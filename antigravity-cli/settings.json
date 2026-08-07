@@ -1,0 +1,27 @@
+{
+  "allowNonWorkspaceAccess": true,
+  "enableTelemetry": false,
+  "model": "Gemini 3.6 Flash (High)",
+  "permissions": {
+    "allow": [
+      "command(find)",
+      "command(git status)",
+      "command(ls)",
+      "command(git ls-files)",
+      "command(git show)"
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "python3 ~/.antigravity/status.py"
+  },
+  "trustedWorkspaces": [
+    "/home/devhax/projects/fusuyfusuy/yokatlas-scrape",
+    "/home/devhax/projects/fusuyfusuy/boun-archive",
+    "/home/devhax/deployment/selfhosted",
+    "/home/devhax",
+    "/home/devhax/projects/fusuyfusuy/boun-scrape",
+    "/home/devhax/clones/appstore.koplugin",
+    "/home/devhax/projects/fusuyfusuy/agents-config"
+  ]
+}

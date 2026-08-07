@@ -1,0 +1,20 @@
+# Antigravity CLI and status runtime state, logs, auth, caches
+*.log
+*.tmp
+*.jsonl
+*.db
+quota-cache.json
+status-state.json
+oauth_creds.json
+antigravity-oauth-token
+google_accounts.json
+projects.json
+state.json
+trustedFolders.json
+installation_id
+.DS_Store
+__pycache__/
+*.pyc
+
+# Local backup files created during setup
+*.bak*
