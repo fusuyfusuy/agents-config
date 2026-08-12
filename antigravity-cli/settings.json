@@ -8,7 +8,10 @@
       "command(git status)",
       "command(ls)",
       "command(git ls-files)",
-      "command(git show)"
+      "command(git show)",
+      "command(bun)",
+      "command(gh)",
+      "command(curl)"
     ]
   },
   "statusLine": {
@@ -22,6 +25,8 @@
     "/home/devhax",
     "/home/devhax/projects/fusuyfusuy/boun-scrape",
     "/home/devhax/clones/appstore.koplugin",
-    "/home/devhax/projects/fusuyfusuy/agents-config"
+    "/home/devhax/projects/fusuyfusuy/agents-config",
+    "/home/devhax/projects/fusuyfusuy",
+    "/home/devhax/projects/geriden.com"
   ]
 }

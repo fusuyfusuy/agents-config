@@ -118,7 +118,7 @@ def extract_arg(command_line: str, name: str) -> str:
 
 def find_server_candidates() -> list[dict]:
     try:
-        ps = subprocess.check_output(["ps", "auxww"], text=True, timeout=1.5)
+        ps = subprocess.check_output(["ps", "auxww"], text=True, stderr=subprocess.DEVNULL, timeout=1.5)
     except Exception:
         return []
 
@@ -157,21 +157,81 @@ def find_server_candidates() -> list[dict]:
 
 
 def get_listening_ports(pid: int) -> list[int]:
+    # 1. Try Linux /proc parsing first (fastest, no lsof/stat/subprocess overhead)
+    try:
+        socket_inodes = set()
+        fd_dir = f"/proc/{pid}/fd"
+        if os.path.exists(fd_dir):
+            for fd in os.listdir(fd_dir):
+                try:
+                    link = os.readlink(os.path.join(fd_dir, fd))
+                    if link.startswith("socket:[") and link.endswith("]"):
+                        socket_inodes.add(link[8:-1])
+                except Exception:
+                    pass
+
+        if socket_inodes:
+            ports = set()
+            for net_file in (f"/proc/{pid}/net/tcp", f"/proc/{pid}/net/tcp6", "/proc/net/tcp", "/proc/net/tcp6"):
+                if not os.path.exists(net_file):
+                    continue
+                try:
+                    with open(net_file, "r") as f:
+                        lines = f.readlines()[1:]
+                    for line in lines:
+                        parts = line.strip().split()
+                        if len(parts) >= 10:
+                            state = parts[3]
+                            inode = parts[9]
+                            if state == "0A" and inode in socket_inodes:
+                                local_addr = parts[1]
+                                port_hex = local_addr.rsplit(":", 1)[-1]
+                                ports.add(int(port_hex, 16))
+                except Exception:
+                    pass
+            if ports:
+                return sorted(list(ports))
+    except Exception:
+        pass
+
+    # 2. Try ss command (fast on Linux, avoids lsof stat issues)
     try:
         out = subprocess.check_output(
-            ["lsof", "-nP", "-a", "-p", str(pid), "-iTCP", "-sTCP:LISTEN"],
+            ["ss", "-Htlpn"],
             text=True,
+            stderr=subprocess.DEVNULL,
             timeout=1.5,
         )
+        ports = set()
+        for line in out.splitlines():
+            if re.search(rf"\bpid={pid}\b", line):
+                parts = line.split()
+                if len(parts) >= 4:
+                    local_addr = parts[3]
+                    port_str = local_addr.rsplit(":", 1)[-1]
+                    if port_str.isdigit():
+                        ports.add(int(port_str))
+        if ports:
+            return sorted(list(ports))
+    except Exception:
+        pass
+
+    # 3. Fallback to lsof with -X flag and stderr suppressed
+    try:
+        out = subprocess.check_output(
+            ["lsof", "-nP", "-X", "-a", "-p", str(pid), "-iTCP", "-sTCP:LISTEN"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=1.5,
+        )
+        ports = []
+        for match in re.finditer(r":(\d+)\s+\(LISTEN\)", out):
+            port = int(match.group(1))
+            if port not in ports:
+                ports.append(port)
+        return sorted(ports)
     except Exception:
         return []
-
-    ports = []
-    for match in re.finditer(r":(\d+)\s+\(LISTEN\)", out):
-        port = int(match.group(1))
-        if port not in ports:
-            ports.append(port)
-    return sorted(ports)
 
 
 def request_user_status(port: int, csrf_token: str, use_https: bool) -> dict:

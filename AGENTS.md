@@ -7,5 +7,5 @@
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 - Use subagents for all the tasks. Keep the main context clear.
-- Unless prompted otherwise, all fusuycorp projects is deployed with ~/deployment/selfhosted documentation. Add new deployment configs and documentation there. 
-
+- When using library provided features, make sure that libraries are available in the target system/architecture/app. 
+- Log every action you take to `AGENT_LOG.md` in the project root, appending a short entry summarizing what you did and why. Create the file if it doesn't exist.
