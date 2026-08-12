@@ -9,6 +9,7 @@ echo "==> Setting up Antigravity / Gemini agents-config symlinks..."
 mkdir -p "$HOME/.gemini/antigravity-cli"
 mkdir -p "$HOME/.gemini/config"
 mkdir -p "$HOME/.antigravity"
+mkdir -p "$HOME/.claude"
 
 # Set executable permissions on scripts
 chmod +x "$SCRIPT_DIR/setup.sh" \
@@ -36,6 +37,7 @@ link_file() {
 }
 
 link_file "$SCRIPT_DIR/AGENTS.md"                        "$HOME/.gemini/AGENTS.md"
+link_file "$SCRIPT_DIR/AGENTS.md"                        "$HOME/.claude/CLAUDE.md"
 link_file "$SCRIPT_DIR/antigravity-cli/settings.json"    "$HOME/.gemini/antigravity-cli/settings.json"
 link_file "$SCRIPT_DIR/antigravity-cli/keybindings.json" "$HOME/.gemini/antigravity-cli/keybindings.json"
 link_file "$SCRIPT_DIR/config/config.json"               "$HOME/.gemini/config/config.json"
