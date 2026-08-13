@@ -7,5 +7,6 @@
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 - Use subagents for all the tasks. Keep the main context clear.
-- When using library provided features, make sure that libraries are available in the target system/architecture/app. 
-- Log every action you take to `AGENT_LOG.md` in the project root, appending a short entry summarizing what you did and why. Create the file if it doesn't exist.
+- When using library provided features, make sure that libraries are available in the target system/architecture/app.
+- For task-level change tracking: Write clean, descriptive Conventional Git Commits (`feat`, `fix`, `docs`, `refactor`) summarizing changes and rationale.
+- For major architectural decisions & technology pivots: Record high-level summary entries in `CHANGELOG.md` or `DECISIONS.md` (or `.agents/logs/session.log` for uncommitted local scratchpads) to keep project logs high-signal.
