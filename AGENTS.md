@@ -16,6 +16,8 @@
 - **Subagent Delegation**: Use subagents for all tasks to keep the main context window clear.
 - **Spec-Driven Execution (SDD)**: For non-trivial features, outline requirements and a clear execution plan (`plan.md` / `tasks.md`) before modifying implementation files.
 - **Empirical Verification**: Never declare a task resolved without running exact build, test, or typecheck verification commands.
+- **Pre-Push Local Build Verification**: Before pushing code changes to remote repositories or triggering CI/CD build pipelines, agents MUST run exact build and typecheck commands locally (e.g. `bun run build`, `bun check`). Avoid `$env/static/public` for dynamic runtime variables; prefer `$env/dynamic/public` with default fallback values so container builds succeed when environment variables are omitted at image build-time.
+
 
 ## 4. Change Tracking & Log Management
 - **Task-Level Commits**: Write clean, descriptive Conventional Git Commits (`feat`, `fix`, `docs`, `refactor`) summarizing changes and rationale.
