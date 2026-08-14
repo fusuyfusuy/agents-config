@@ -1,78 +1,92 @@
-# Global Agent Operating Principles (AGENTS.md)
+# AGENTS.md — Operating Principles
 
-## 1. Core Engineering & Architecture Directives
-- **No Obsolete Layers**: Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
-- **Simplest Implementation**: Choose the simplest implementation that fully meets current requirements. Avoid speculative abstractions, configuration, and indirection.
-- **Layered System Growth**: Grow the system in layers. Start from the smallest version that works end-to-end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
-- **Long-Term Architectural Quality**: Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
-- **Modular Components**: Keep components modular and concerns clearly separated.
-
-## 2. Dependencies & Framework Rules
-- **Prefer Established Libraries**: Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
-- **Inspect Dependencies First**: Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
-- **Target Compatibility**: When using library-provided features, ensure that libraries are available in the target system/architecture/app.
-
-## 3. Workflow & Spec-Driven Development (SDD)
-- **Subagent Delegation**: Use subagents for all tasks to keep the main context window clear.
-- **Spec-Driven Execution (SDD)**: For non-trivial features, outline requirements and a clear execution plan (`plan.md` / `tasks.md`) before modifying implementation files.
-- **Empirical Verification**: Never declare a task resolved without running exact build, test, or typecheck verification commands.
-- **Pre-Push Local Build Verification**: Before pushing code changes to remote repositories or triggering CI/CD build pipelines, agents MUST run exact build and typecheck commands locally (e.g. `bun run build`, `bun check`). Avoid `$env/static/public` for dynamic runtime variables; prefer `$env/dynamic/public` with default fallback values so container builds succeed when environment variables are omitted at image build-time.
-
-
-## 4. Change Tracking & Log Management
-- **Task-Level Commits**: Write clean, descriptive Conventional Git Commits (`feat`, `fix`, `docs`, `refactor`) summarizing changes and rationale.
-- **High-Level Architectural Logs**: Record major architectural decisions and pivots in `CHANGELOG.md` or `DECISIONS.md` (or `.agents/logs/session.log` for uncommitted local scratchpads) to maintain high-signal project logs.
-
-# Engineering Principles Details
-# Agent Instructions & Project Invariants
-
-## Core Directive
-> Model explicit data structures first, keep transformations flat and deterministic, and write mechanically sympathetic code that rejects unnecessary abstraction in favor of measurable simplicity and correctness.
+> Model data first. Keep it flat. Verify before you ship. Don't guess — inspect.
 
 ---
 
-## 1. General Engineering Invariants
-- **Data Layout First:** Define complete data models, types, and schemas before writing control flow or business logic.
-- **Flat Over Nested:** Eliminate deep nesting (`if/else` ladders, nested callbacks). Favor early returns, guard clauses, and flat table-driven lookups (LUTs).
-- **Mechanical Sympathy:** Minimize unneeded allocations (e.g., redundant deep copies, excessive object spreads in loops). Keep hot execution paths contiguous and linear.
-- **Explicit Error Boundaries:** Never swallow exceptions or introduce silent fallback defaults. Model failures explicitly via Result types, Discriminated Unions, or typed exceptions.
-- **Zero Speculative Code:** Write only the minimal code needed for the immediate task. Never create premature abstractions, unused helper layers, or "future-proofing" hooks.
+## 1. How You Think
+
+- **Schema before logic.** Define types, interfaces, and data models before writing any control flow.
+- **Flat over nested.** Early returns, guard clauses, LUTs. Kill `if/else` ladders.
+- **Simplest thing that works.** No speculative abstractions, no "future-proofing" hooks, no Gang-of-Four patterns where a function or lookup table will do.
+- **Mechanical sympathy.** Minimize allocations on hot paths. No cascading spreads in loops. Keep execution contiguous.
+- **Explicit errors.** Never swallow exceptions. Use Result types, discriminated unions, or typed exceptions. No silent fallback defaults.
 
 ---
 
-## 2. TypeScript Standards
-- **Data Modeling:** Use `type` and `interface` for pure data shapes. Avoid `class` unless interfacing with an external framework lifecycle.
-- **Strict Typing:** 
-  - Never use `any`. Use `unknown` with explicit type narrowing or type guards.
-  - Model domain states and operation results using **Discriminated Unions**.
-  - Use `as const` for fixed lookup tables, state maps, and enums.
-- **Allocation Awareness:** Avoid cascading object spreads (`{ ...state, ...delta }`) inside high-frequency loops; use local mutation buffers or structured batching when handling large arrays.
-- **Async Hygiene:** Handle all Promise rejections explicitly. Use `Promise.all` for independent parallel I/O; avoid unhandled fire-and-forget execution.
+## 2. How You Build
+
+- **Layered growth.** Start from the smallest working end-to-end version. Add capabilities on top of something that already works. Never trade a working product for unfinished complexity.
+- **No obsolete layers.** Remove dead paths. Don't add compatibility shims, fallbacks, or migrations for deprecated code.
+- **Modular and separated.** One concern per module. Clean boundaries.
+- **Long-term decisions only.** No stopgaps. If it's "temporary," it's wrong.
 
 ---
 
-## 3. Python Standards
-- **Data Modeling:**
-  - Use `@dataclass(slots=True, kw_only=True)` for internal data transfer objects and domain models.
-  - Use Pydantic (`BaseModel`) strictly at external I/O boundaries (HTTP schemas, environment configuration).
-- **Typing & Signatures:** Annotate all function signatures and return types using modern Python syntax (`T | None`, `list[str]`).
-- **Composition Over Inheritance:** Keep functions top-level, stateless, and pure where possible. Use `typing.Protocol` for structural interfaces; reject multi-level class inheritance.
-- **Lookup Tables:** Prefer dictionary dispatch or `match/case` over long `if/elif/else` branches.
-- **Memory & Resource Safety:** Always manage resources with context managers (`with`). Use generators (`yield`) for streaming datasets to keep memory overhead $O(1)$.
+## 3. How You Use Dependencies
+
+- **Inspect what's already there.** Check installed packages, their types, and their docs before writing your own or adding new ones.
+- **Prefer established libraries** when they reduce complexity. Don't reimplement common functionality without a reason.
+- **Verify target compatibility.** Confirm the library version, API surface, and runtime availability in the actual environment — not from memory.
 
 ---
 
-## 4. Execution & Verification Workflow
-When generating or modifying code, follow this exact sequence:
+## 4. How You Work (Workflow)
 
-1. **Schema & Types:** Define or update the target types/schemas first.
-2. **Implementation:** Write the most direct, flat implementation that fulfills the spec.
-3. **Verification Checklist:**
-   - [ ] Are type checks passing cleanly (`tsc --noEmit`, `pyright`, or `mypy`)?
-   - [ ] Are edge cases (null/None, empty collections, network timeouts) explicitly handled?
-   - [ ] Are tests included or updated to cover the new behavior and edge cases?
+- **Spec first (SDD).** For non-trivial features: outline requirements in `plan.md` / `tasks.md` before touching implementation files.
+- **Subagent delegation.** Offload research, exploration, and isolated tasks to subagents. Keep the main context window lean.
+- **Inspect before you edit.** Always `view_file` on the target lines before modifying. Never edit blind.
+- **Targeted reading.** View 100–300 line ranges. Use grep/symbol search for navigation. Never dump entire files into context.
 
-## 5. Negative Constraints (Strictly Forbidden)
-- **DO NOT** install new third-party dependencies without explicit instruction.
-- **DO NOT** refactor unrelated files or rewrite existing code outside the requested scope.
-- **DO NOT** introduce Gang-of-Four design patterns (Factories, Adapters, Strategies) where a single pure function or table lookup is sufficient.
+---
+
+## 5. How You Verify
+
+- **Closed loop, no exceptions.** Every edit goes through: `Edit → Typecheck → Lint → Test → Observe → Iterate`.
+- **Never declare done without proof.** Run the exact build, typecheck, or test command. Green output or it didn't happen.
+- **Pre-push local build.** Run `bun run build`, `tsc --noEmit`, or equivalent locally before pushing or triggering CI.
+- **3-strike rule.** If the same fix fails 3 consecutive times: stop. Step back. Re-read the original code. Update `plan.md`. Verify assumptions from first principles. Don't loop on a broken hypothesis.
+
+---
+
+## 6. How You Avoid Hallucination
+
+- **Ground in real types.** Before using any API: inspect the actual installed package signatures (`.d.ts`, `dir()`, `__all__`). Don't interpolate from memory.
+- **Probe before you commit.** For unfamiliar libraries or patterns, write a 5-line scratch script and execute it before integrating into the codebase.
+- **Don't retreat silently.** If a new approach fails, diagnose *why* by inspecting docs and types — don't silently revert to a legacy pattern. If you must fall back, document the reason.
+- **Separate research from implementation.** Research findings are hypotheses until verified by the compiler. Treat them accordingly.
+
+---
+
+## 7. Language Standards
+
+### TypeScript
+- `type` and `interface` for data shapes. Avoid `class` unless a framework demands it.
+- Never `any`. Use `unknown` + type guards. Discriminated unions for domain states. `as const` for fixed lookups.
+- No cascading spreads in loops. Use local mutation buffers for batch operations.
+- Handle all Promise rejections explicitly. `Promise.all` for independent parallel I/O.
+
+### Python
+- `@dataclass(slots=True, kw_only=True)` for domain models. Pydantic (`BaseModel`) strictly at I/O boundaries.
+- Annotate all signatures: `T | None`, `list[str]`. Modern syntax only.
+- Top-level pure functions. `typing.Protocol` for interfaces. No deep class hierarchies.
+- Dictionary dispatch or `match/case` over `if/elif/else` chains.
+- Context managers (`with`) for resources. Generators (`yield`) for streaming data.
+
+---
+
+## 8. How You Track Changes
+
+- **Conventional Commits.** `feat:`, `fix:`, `docs:`, `refactor:` — with rationale, not just description.
+- **Decision log.** Record architectural pivots in `DECISIONS.md` or `CHANGELOG.md`. Future-you (and future-agents) will need the *why*.
+- **Session scratchpad.** Use `.agents/logs/session.log` for uncommitted local notes during a session.
+
+---
+
+## 9. Hard No's
+
+- **DO NOT** install new dependencies without explicit instruction.
+- **DO NOT** refactor unrelated files or rewrite code outside the requested scope.
+- **DO NOT** declare a task complete without running verification commands.
+- **DO NOT** assume an API exists because it "should." Inspect first.
+- **DO NOT** loop on a broken fix. 3 strikes → replan.
