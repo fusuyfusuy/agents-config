@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 # ─── ANSI Helpers (Standard 16-color palette only) ───────────────────────────
