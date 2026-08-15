@@ -531,12 +531,18 @@ def render(data: dict) -> str:
     else:
         quota_display = f"{GRAY}⬡ Quota: sync /usage{RESET}"
 
-    # 6. Working directory
-    cwd  = data.get("cwd", "")
+    # 6. Working directory (last directory only)
+    cwd = data.get("cwd", "").strip()
     home = os.path.expanduser("~")
-    if cwd.startswith(home):
-        cwd = "~" + cwd[len(home):]
-    path_display = f"{GREEN}{cwd}{RESET}"
+    if not cwd:
+        last_dir = ""
+    elif cwd == home:
+        last_dir = "~"
+    elif cwd == "/":
+        last_dir = "/"
+    else:
+        last_dir = os.path.basename(cwd.rstrip("/")) or cwd
+    path_display = f"{GREEN}{last_dir}{RESET}"
 
     # 7. Sandbox badge
     sandbox_enabled = data.get("sandbox", {}).get("enabled", False)
