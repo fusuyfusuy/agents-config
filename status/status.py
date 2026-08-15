@@ -521,15 +521,15 @@ def render(data: dict) -> str:
     quota = load_quota_for_model(raw_name, data)
     if quota.get("stale"):
         reason = quota.get("reason", "stale")
-        quota_display = f"{GRAY}⬡ Quota: sync /usage ({reason}){RESET}"
+        quota_display = f"{GRAY}⬡ quota: sync /usage ({reason}){RESET}"
     elif "remaining_percentage" in quota:
         quota_pct = float(quota["remaining_percentage"])
         qc = quota_color(quota_pct)
         reset_in = quota.get("refreshes_in") or ""
-        reset_display = f"{GRAY} · reset {reset_in}{RESET}" if reset_in else ""
-        quota_display = f"{qc}⬡ Quota: {quota_pct:.0f}%{RESET}{reset_display}"
+        reset_display = f"{GRAY} · rst {reset_in}{RESET}" if reset_in else ""
+        quota_display = f"{qc}⬡ quota {quota_pct:.0f}%{RESET}{reset_display}"
     else:
-        quota_display = f"{GRAY}⬡ Quota: sync /usage{RESET}"
+        quota_display = f"{GRAY}⬡ quota: sync /usage{RESET}"
 
     # 6. Working directory (last directory only)
     cwd = data.get("cwd", "").strip()
