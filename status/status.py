@@ -82,6 +82,49 @@ def normalize_model_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
 
 
+def shorten_model_name(name: str) -> str:
+    if not name:
+        return "AGY"
+
+    thinking_suffix = ""
+    lower = name.lower()
+    if "(thinking)" in lower:
+        thinking_suffix = " (T)"
+    elif "(high)" in lower:
+        thinking_suffix = " (H)"
+    elif "(medium)" in lower:
+        thinking_suffix = " (M)"
+    elif "(low)" in lower:
+        thinking_suffix = " (L)"
+
+    clean = re.sub(r"\(.*?\)", "", name).strip()
+
+    m = re.search(r"(?:claude\s+)?(?:(\d+\.\d+)\s+)?(opus|sonnet|haiku)(?:\s+(\d+\.\d+))?", clean, re.IGNORECASE)
+    if m:
+        family = m.group(2).capitalize()
+        ver = m.group(3) or m.group(1) or ""
+        return f"{family} {ver}".strip() + thinking_suffix
+
+    m = re.search(r"(?:gemini\s+)?(?:(\d+\.\d+)\s+)?(flash|pro|ultra)(?:\s+(\d+\.\d+))?", clean, re.IGNORECASE)
+    if m:
+        family = m.group(2).capitalize()
+        ver = m.group(3) or m.group(1) or ""
+        return f"{family} {ver}".strip() + thinking_suffix
+
+    m = re.search(r"gpt[-_ ]?(\d+o?[-_ ]?mini|\d+o|\d+)", clean, re.IGNORECASE)
+    if m:
+        return f"GPT-{m.group(1)}" + thinking_suffix
+
+    m = re.search(r"(o[1-4](?:[-_ ]mini)?)", clean, re.IGNORECASE)
+    if m:
+        return m.group(1) + thinking_suffix
+
+    if len(clean) > 16:
+        clean = clean[:16].strip()
+
+    return clean + thinking_suffix
+
+
 def quota_color(pct: float) -> str:
     if pct >= 50:
         return PURPLE
@@ -489,7 +532,8 @@ def render(data: dict) -> str:
         raw_name = model_info.get("display_name") or model_info.get("id") or "AGY"
     else:
         raw_name = str(model_info) or "AGY"
-    model_display = f"{YELLOW}{BOLD}{raw_name}{RESET}"
+    short_name = shorten_model_name(raw_name)
+    model_display = f"{YELLOW}{BOLD}{short_name}{RESET}"
 
     # 2. Agent state
     state = data.get("agent_state", "idle")
