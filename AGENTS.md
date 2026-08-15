@@ -34,7 +34,7 @@
 ## 4. How You Work (Workflow)
 
 - **Spec first (SDD).** For non-trivial features: outline requirements in `plan.md` / `tasks.md` before touching implementation files.
-- **Subagent delegation.** Offload research, exploration, and isolated tasks to subagents. Keep the main context window lean.
+- **Subagent-first delegation.** Subagents are the default for all non-trivial work — research, exploration, multi-file inspection, test execution, and isolated implementation tasks. Keep the main context window lean; only trivial tasks (e.g. single targeted commands, direct single-file views, immediate simple answers) should be handled directly.
 - **Inspect before you edit.** Always `view_file` on the target lines before modifying. Never edit blind.
 - **Targeted reading.** View 100–300 line ranges. Use grep/symbol search for navigation. Never dump entire files into context.
 
