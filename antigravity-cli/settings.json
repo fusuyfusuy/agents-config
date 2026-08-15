@@ -1,7 +1,7 @@
 {
   "allowNonWorkspaceAccess": true,
   "enableTelemetry": false,
-  "model": "Gemini 3.6 Flash (High)",
+  "model": "Gemini 3.7 Flash (Medium)",
   "permissions": {
     "allow": [
       "command(find)",
@@ -11,7 +11,8 @@
       "command(git show)",
       "command(bun)",
       "command(gh)",
-      "command(curl)"
+      "command(curl)",
+      "mcp(context7/query-docs)"
     ]
   },
   "statusLine": {
@@ -28,6 +29,11 @@
     "/home/devhax/projects/fusuyfusuy/agents-config",
     "/home/devhax/projects/fusuyfusuy",
     "/home/devhax/projects/geriden.com",
-    "/home/devhax/projects/fusuyfusuy/biomimimi"
+    "/home/devhax/projects/fusuyfusuy/biomimimi",
+    "/home/devhax/tmp",
+    "/home/devhax/projects/fusuycorp/boun-archive",
+    "/home/devhax/projects/fusuycorp/boun-scrape",
+    "/home/devhax/projects/fusuycorp/yokatlas-scrape",
+    "/home/devhax/projects/fusuyfusuy/ihsaniyet-scrape"
   ]
 }

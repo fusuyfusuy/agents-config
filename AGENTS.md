@@ -34,7 +34,7 @@
 ## 4. How You Work (Workflow)
 
 - **Spec first (SDD).** For non-trivial features: outline requirements in `plan.md` / `tasks.md` before touching implementation files.
-- **Subagent-first delegation.** Subagents are the default for all non-trivial work — research, exploration, multi-file inspection, test execution, and isolated implementation tasks. Keep the main context window lean; only trivial tasks (e.g. single targeted commands, direct single-file views, immediate simple answers) should be handled directly.
+- **Subagent-first delegation.** Subagents are the default for all non-trivial work — research, exploration, multi-file inspection, test execution, and isolated implementation tasks. Keep the main context window lean; mandate concise, structured summaries from subagents.
 - **Inspect before you edit.** Always `view_file` on the target lines before modifying. Never edit blind.
 - **Targeted reading.** View 100–300 line ranges. Use grep/symbol search for navigation. Never dump entire files into context.
 
@@ -44,6 +44,7 @@
 
 - **Closed loop, no exceptions.** Every edit goes through: `Edit → Typecheck → Lint → Test → Observe → Iterate`.
 - **Never declare done without proof.** Run the exact build, typecheck, or test command. Green output or it didn't happen.
+- **Regression test first.** For bug fixes: write or identify a failing test that reproduces the issue before modifying implementation code.
 - **Pre-push local build.** Run `bun run build`, `tsc --noEmit`, or equivalent locally before pushing or triggering CI.
 - **3-strike rule.** If the same fix fails 3 consecutive times: stop. Step back. Re-read the original code. Update `plan.md`. Verify assumptions from first principles. Don't loop on a broken hypothesis.
 
@@ -78,6 +79,7 @@
 ## 8. How You Track Changes
 
 - **Conventional Commits.** `feat:`, `fix:`, `docs:`, `refactor:` — with rationale, not just description.
+- **Explicit staging.** Stage only targeted files (`git add <file>`). Never use `git add .` or `git commit -a` to avoid polluting commits with untracked artifacts, logs, or secrets.
 - **Decision log.** Record architectural pivots in `DECISIONS.md` or `CHANGELOG.md`. Future-you (and future-agents) will need the *why*.
 - **Session scratchpad.** Use `.agents/logs/session.log` for uncommitted local notes during a session.
 
@@ -90,3 +92,4 @@
 - **DO NOT** declare a task complete without running verification commands.
 - **DO NOT** assume an API exists because it "should." Inspect first.
 - **DO NOT** loop on a broken fix. 3 strikes → replan.
+- **DO NOT** use indiscriminate staging (`git add .`, `git add -A`). Stage explicit paths only.
