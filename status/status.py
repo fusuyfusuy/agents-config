@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Antigravity IDE — Status Line Script
-Row 1: model · state · context left · path · quota · session tokens
+Row 1: path · model · state · ctx · quota · session tokens
 Row 2: 💡 Tip  (rotates at most once every 3 seconds, persisted across restarts)
 """
 import sys
@@ -506,7 +506,7 @@ def render(data: dict) -> str:
     cw      = data.get("context_window", {})
     rem_pct = float(cw.get("remaining_percentage", 100.0))
     cc      = context_color(rem_pct)
-    ctx_display = f"{cc}Context {rem_pct:.0f}% left{RESET}"
+    ctx_display = f"{cc}ctx {rem_pct:.0f}%{RESET}"
 
     # 4. Session token totals
     in_t    = int(cw.get("total_input_tokens",  0))
@@ -554,10 +554,10 @@ def render(data: dict) -> str:
 
     # ── Assemble rows ──────────────────────────────────────────────────────────
     row1 = (
+        f"{path_display}{sandbox_str}{SEP}"
         f"{model_display}{SEP}"
         f"{state_display}{SEP}"
         f"{ctx_display}{SEP}"
-        f"{path_display}{sandbox_str}{SEP}"
         f"{quota_display}{SEP}"
         f"{tokens_display}"
     )
