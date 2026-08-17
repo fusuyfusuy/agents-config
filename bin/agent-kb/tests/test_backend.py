@@ -1,6 +1,9 @@
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from click.testing import CliRunner
 
 # Add backend directory to sys.path
@@ -8,13 +11,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
 from models import RecordInput
 from db import ErrorDatabase
+import cli as cli_module
 from cli import cli
 
 class TestAgentErrorKB(unittest.TestCase):
-    
+    """Uses an isolated temp DB per test — never touches the real ~/.agent-kb/kb.db."""
+
     def setUp(self):
-        self.db = ErrorDatabase()
+        self.tmpdir = tempfile.mkdtemp()
+        self.db = ErrorDatabase(db_path=Path(self.tmpdir) / "kb.db")
         self.runner = CliRunner()
+        self._db_patch = patch.object(cli_module, "db", self.db)
+        self._db_patch.start()
+
+    def tearDown(self):
+        self._db_patch.stop()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_01_lookup_error_solution(self):
         results = self.db.search_solutions(query="fatal: Unable to create '.git/index.lock': File exists", limit=3)
@@ -61,6 +73,10 @@ class TestAgentErrorKB(unittest.TestCase):
         ])
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Recorded Solution Successfully!", result.output)
+
+    def test_06_no_mcp_command(self):
+        """Regression: the MCP server mode was dropped (broken against the installed mcp SDK) and must stay gone."""
+        self.assertNotIn("mcp", cli.commands)
 
 if __name__ == "__main__":
     unittest.main()

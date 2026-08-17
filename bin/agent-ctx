@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import datetime
+import io
 import json
 import os
 import re
@@ -362,6 +364,24 @@ def run_self_test() -> int:
         }
         act_file.write_text(json.dumps(entry) + "\n")
         assert act_file.exists(), "activity.jsonl should exist"
+
+        # Regression: `dump` must regenerate the symbol map live, never echo a stale cached repo_map.md
+        stale_marker = "STALE_MARKER_SHOULD_NOT_APPEAR"
+        (agents_dir / "repo_map.md").write_text(f"# Repository Map\n\n{stale_marker}\n")
+        (tmppath / "src" / "new_module.py").write_text("def new_function():\n    pass\n")
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmppath)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                cmd_dump(argparse.Namespace())
+            dump_output = buf.getvalue()
+        finally:
+            os.chdir(old_cwd)
+
+        assert "new_module.py" in dump_output, "dump should reflect files added after repo_map.md was last cached"
+        assert stale_marker not in dump_output, "dump should not echo stale cached repo_map.md content"
 
         print("Self-test passed successfully.")
         return 0

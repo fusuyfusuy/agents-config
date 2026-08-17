@@ -37,6 +37,17 @@ def main():
     assert res_rec.returncode == 0, f"Record failed: {res_rec.stderr}"
     assert "Recorded Solution Successfully!" in res_rec.stdout, "Record command failed output assertion!"
 
+    print("\n=== 4. Cleanup: removing verification test record from the real DB ===")
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM errors WHERE error_message = ?", ("test_verification_error: database is locked",))
+        row = cur.fetchone()
+        if row:
+            cur.execute("DELETE FROM solutions WHERE error_id = ?", (row["id"],))
+            cur.execute("DELETE FROM errors WHERE id = ?", (row["id"],))
+            conn.commit()
+    print("Cleanup complete.")
+
     print("\n✅ ALL VERIFICATION CHECKS PASSED SUCCESSFULLY!")
 
 if __name__ == "__main__":
