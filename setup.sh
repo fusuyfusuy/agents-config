@@ -7,7 +7,7 @@ echo "==> Setting up Antigravity / Gemini / Claude agents-config symlinks..."
 
 # Ensure base target directories exist
 mkdir -p "$HOME/.gemini/antigravity-cli"
-mkdir -p "$HOME/.gemini/config"
+mkdir -p "$HOME/.gemini/config/skills"
 mkdir -p "$HOME/.antigravity"
 mkdir -p "$HOME/.claude/skills"
 
@@ -56,11 +56,12 @@ link_file "$SCRIPT_DIR/status/agy-quota-cache.py"        "$HOME/.antigravity/agy
 link_file "$SCRIPT_DIR/claude/settings.json"             "$HOME/.claude/settings.json"
 link_file "$SCRIPT_DIR/claude/statusline-command.sh"     "$HOME/.claude/statusline-command.sh"
 
-# Claude Skills
+# Skills (Claude & Gemini / Antigravity Global)
 if [ -d "$SCRIPT_DIR/claude/skills" ]; then
     find "$SCRIPT_DIR/claude/skills" -type f | sort | while read -r skill_file; do
         rel_path="${skill_file#$SCRIPT_DIR/claude/skills/}"
         link_file "$skill_file" "$HOME/.claude/skills/$rel_path"
+        link_file "$skill_file" "$HOME/.gemini/config/skills/$rel_path"
     done
 fi
 
