@@ -9,20 +9,41 @@ description: Zero-daemon project memory, structural symbol mapping, and activity
 
 ## 1. Fast Warmup / Startup
 
-Before performing multi-file discovery or broad grepping, inspect the project's memory, decisions, and structural symbol map:
+Run this first, before any broad grepping or directory crawling:
 
 ```bash
 agent-ctx dump
 ```
 
-`dump` always regenerates the symbol map live (it never reads a cached file), so its output is guaranteed current — no separate refresh needed before trusting it.
+One call returns five things: **working state** (branch, uncommitted files, recent commits), **project memory**, **architecture decisions**, a **ranked symbol map**, and **recent activity**.
 
-To write a fresh copy of the AST repository symbol map to `.agents/repo_map.md` (for humans/other tools browsing the repo directly), or view it without writing:
+The map is regenerated live on every call, so it never serves stale cached data. Read it as an *orientation* layer, not an index:
+
+- Files are ranked by import in-degree, recent commit churn, and entry-point detection — the top of the map is what matters in this repo, not what sorts first alphabetically.
+- `← cli, db, kb_engine` on a file means those modules import it. That is the one thing `Grep` cannot give you in a single call.
+- Symbols carry signatures and `:line` numbers, so you can `Read` with an offset instead of searching.
+- Output is capped by a character budget. When lower-ranked files are collapsed, the map **says so explicitly** and gives the counts — if it doesn't say it was truncated, you are seeing everything.
+
+Still use `Glob`/`Grep` for exact locations, call sites, and anything below the top-level symbols. The map tells you *where to look*; it does not replace searching.
+
+To write a fresh copy of the map to `.agents/repo_map.md` (for humans or other tools browsing the repo), or print it without writing:
 
 ```bash
 agent-ctx map
 agent-ctx map --stdout
 ```
+
+### Budget
+
+`dump` and `map` both accept `--budget <chars|default|large|immense>` (or the `AGENT_CTX_BUDGET` env var). `large` is 60 000 chars, `immense` is 200 000.
+
+A bigger budget costs **tokens, not time** — generation is flat regardless — and it saturates: past the point where every ranked file is already detailed, extra budget buys nothing. On a small-to-mid repo `large` and `immense` are often byte-identical to each other. Reach for a bigger budget when you need broad coverage of an unfamiliar large repo; stay on `default` for routine work, since an oversized dump crowds the context it is meant to save.
+
+When the budget binds, degradation is by priority and nothing vanishes silently:
+
+- **Memory** keeps invariants and gotchas ahead of status/epics; an oversized top-priority section is truncated rather than dropped.
+- **Decisions** always list **every ADR title**, expanding bodies newest-first — so you always know which decisions exist and can read any body from the file.
+- **Map** collapses lower-ranked files by directory and reports the counts.
 
 ## 2. Initialize a Project
 

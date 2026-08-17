@@ -17,14 +17,45 @@ import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
+# Used only when the repo is not a git checkout; inside git, `git ls-files` is
+# the authority on what is visible (it implements .gitignore correctly).
 DEFAULT_IGNORES = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build",
     "target", ".pytest_cache", ".mypy_cache", ".ruff_cache", "coverage",
     ".idea", ".vscode", ".next", ".turbo", ".gemini", ".antigravity",
 }
+
+CODE_EXTS = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".c", ".cpp", ".h"}
+JS_EXTS = (".ts", ".tsx", ".js", ".jsx")
+# Deliberately excludes index.{ts,js}: those are usually barrel re-export hubs, the
+# opposite of an entry point. A real package entry is declared in package.json and
+# picked up by detect_entry_points instead.
+ENTRY_NAMES = {
+    "main.py", "__main__.py", "app.py", "cli.py", "manage.py", "server.py",
+    "main.go", "main.rs",
+}
+# Next.js / Remix style file-system routing: these *are* the app's entry points.
+ROUTE_STEMS = {"page", "layout", "route"}
+
+MAP_BUDGET_DEFAULT = 12000
+# `dump` spends its budget in priority order: memory and decisions are hand-written
+# and cannot be recovered from the code, so they are served first; the map is
+# derivable and re-queryable with Grep, so it absorbs whatever is left.
+DUMP_TOTAL_BUDGET = 24000
+DUMP_MAP_MIN_BUDGET = 4000
+# Presets are absolute character budgets (~4 chars per token). Raising the budget
+# costs tokens, not time — generation is flat regardless — and buys progressively
+# less: the map saturates at a size set by the repo, after which more budget adds
+# nothing. There is deliberately no "unlimited": on a 12k-file repo an uncapped map
+# renders ~4.3MB (~1.09M tokens), several times a full context window.
+BUDGET_PRESETS = {"large": 60_000, "immense": 200_000}
+COLLAPSE_RESERVE = 1200  # room for the collapsed-dirs tail, so it stays inside the budget
+MAX_PARSE_BYTES = 500_000
+CHURN_DAYS = 90
 
 DEFAULT_MEMORY_TEMPLATE = """# Project Memory
 
@@ -48,6 +79,10 @@ DEFAULT_DECISIONS_TEMPLATE = """# Architecture Decisions (ADRs)
 """
 
 
+# --------------------------------------------------------------------------
+# repo root & git
+# --------------------------------------------------------------------------
+
 def find_repo_root(start: Optional[Path] = None) -> Path:
     curr = (start or Path.cwd()).resolve()
     for parent in [curr] + list(curr.parents):
@@ -56,138 +91,754 @@ def find_repo_root(start: Optional[Path] = None) -> Path:
     return curr
 
 
-def get_git_branch(root: Path) -> str:
+def run_git(root: Path, *args: str, timeout: int = 5) -> Optional[str]:
+    """Run a git command in `root`. Returns stdout, or None if git/repo is unavailable."""
     try:
         res = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
+            ["git", "-C", str(root), *args],
+            capture_output=True, text=True, timeout=timeout, check=False,
         )
-        if res.returncode == 0 and res.stdout.strip():
-            return res.stdout.strip()
     except Exception:
-        pass
-    return "main"
+        return None
+    if res.returncode != 0:
+        return None
+    return res.stdout
 
 
-def read_gitignore(root: Path) -> Set[str]:
-    patterns = set(DEFAULT_IGNORES)
-    gitignore = root / ".gitignore"
-    if gitignore.is_file():
-        try:
-            for line in gitignore.read_text(encoding="utf-8", errors="ignore").splitlines():
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    clean = line.rstrip("/").lstrip("/")
-                    if clean:
-                        patterns.add(clean)
-        except Exception:
-            pass
-    return patterns
+def get_git_branch(root: Path) -> Optional[str]:
+    """Current branch name, "detached@<sha>" on detached HEAD, or None outside git.
+
+    Never guesses a branch name: a fabricated value would be written into the
+    permanent activity log.
+    """
+    out = run_git(root, "rev-parse", "--abbrev-ref", "HEAD", timeout=2)
+    if out is None or not out.strip():
+        return None
+    branch = out.strip()
+    if branch == "HEAD":
+        sha = run_git(root, "rev-parse", "--short", "HEAD", timeout=2)
+        return f"detached@{sha.strip()}" if sha and sha.strip() else "detached"
+    return branch
 
 
-def should_ignore(rel_path: Path, ignores: Set[str]) -> bool:
-    parts = rel_path.parts
-    for part in parts:
-        if part in ignores:
-            return True
-        for ign in ignores:
-            if ign.startswith("*") and part.endswith(ign[1:]):
-                return True
-    return False
+def should_ignore(rel_path: Path) -> bool:
+    return any(part in DEFAULT_IGNORES for part in rel_path.parts)
 
 
-def extract_python_symbols(content: str) -> List[str]:
-    symbols = []
-    try:
-        tree = ast.parse(content)
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef):
-                methods = [n.name for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
-                m_str = f" ({', '.join(methods[:5])}{'...' if len(methods) > 5 else ''})" if methods else ""
-                symbols.append(f"class {node.name}{m_str}")
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                symbols.append(f"def {node.name}()")
-    except Exception:
-        # Fallback to regex if ast parsing fails
-        for line in content.splitlines():
-            m = re.match(r"^(?:class|def|async def)\s+([a-zA-Z0-9_]+)", line.strip())
-            if m:
-                symbols.append(m.group(0))
-    return symbols
+def list_files(root: Path) -> List[str]:
+    """Repo-visible files as posix-relative strings.
 
+    Delegates to `git ls-files` so .gitignore semantics (negations, path-scoped
+    patterns, globs) are git's problem, not ours. Falls back to a walk with a
+    fixed ignore list outside git checkouts.
+    """
+    out = run_git(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z", timeout=15)
+    if out is not None:
+        rels = {p for p in out.split("\0") if p}
+        return sorted(r for r in rels if (root / r).is_file())
 
-def extract_generic_symbols(content: str, ext: str) -> List[str]:
-    symbols = []
-    patterns = {
-        ".js": [r"^(?:export\s+)?(?:function|class|const|let)\s+([A-Za-z0-9_$]+)"],
-        ".jsx": [r"^(?:export\s+)?(?:function|class|const|let)\s+([A-Za-z0-9_$]+)"],
-        ".ts": [r"^(?:export\s+)?(?:function|class|interface|type|enum|const)\s+([A-Za-z0-9_$]+)"],
-        ".tsx": [r"^(?:export\s+)?(?:function|class|interface|type|enum|const)\s+([A-Za-z0-9_$]+)"],
-        ".go": [r"^func\s+(?:\([^\)]+\)\s+)?([A-Za-z0-9_]+)", r"^type\s+([A-Za-z0-9_]+)\s+(?:struct|interface)"],
-        ".rs": [r"^(?:pub\s+)?(?:fn|struct|enum|trait|type)\s+([A-Za-z0-9_]+)"],
-        ".c": [r"^[A-Za-z0-9_ *]+\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*\{"],
-        ".cpp": [r"^(?:class|struct)\s+([A-Za-z0-9_]+)", r"^[A-Za-z0-9_ *:]+\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*\{"],
-        ".h": [r"^(?:class|struct)\s+([A-Za-z0-9_]+)", r"^[A-Za-z0-9_ *:]+\s+([A-Za-z0-9_]+)\s*\([^)]*\);"],
-    }
-    regexes = patterns.get(ext, [])
-    if not regexes:
-        return []
-
-    compiled = [re.compile(p) for p in regexes]
-    for line in content.splitlines()[:500]:  # scan first 500 lines
-        line_clean = line.strip()
-        for c in compiled:
-            m = c.match(line_clean)
-            if m:
-                symbols.append(m.group(0)[:60])
-                break
-        if len(symbols) >= 15:
-            break
-    return symbols
-
-
-def generate_repo_map(root: Path, max_files: int = 150) -> str:
-    ignores = read_gitignore(root)
-    file_entries = []
-
+    found = []
     for dirpath, dirnames, filenames in os.walk(root):
         rel_dir = Path(dirpath).relative_to(root)
-        if should_ignore(rel_dir, ignores):
-            dirnames.clear()
+        dirnames[:] = [d for d in dirnames if not should_ignore(rel_dir / d)]
+        for f in filenames:
+            rel = rel_dir / f if rel_dir != Path(".") else Path(f)
+            if not should_ignore(rel) and not f.endswith(".pyc"):
+                found.append(rel.as_posix())
+    return sorted(found)
+
+
+def get_churn(root: Path, days: int = CHURN_DAYS) -> Dict[str, int]:
+    """Commits touching each file in the recent window. Empty dict outside git."""
+    out = run_git(root, "log", f"--since={days}.days", "-n", "400", "--name-only",
+                  "--pretty=format:", timeout=10)
+    if not out:
+        return {}
+    counts: Dict[str, int] = {}
+    for line in out.splitlines():
+        line = line.strip()
+        if line:
+            counts[line] = counts.get(line, 0) + 1
+    return counts
+
+
+def get_working_state(root: Path) -> Optional[str]:
+    """Branch, uncommitted files and recent commits — what a resuming agent needs first."""
+    branch = get_git_branch(root)
+    if branch is None:
+        return None
+
+    lines = [f"- branch: `{branch}`"]
+
+    status = run_git(root, "status", "--porcelain")
+    dirty = [l for l in (status or "").splitlines() if l.strip()]
+    if dirty:
+        lines.append(f"- uncommitted ({len(dirty)}):")
+        for entry in dirty[:10]:
+            lines.append(f"    - `{entry.strip()}`")
+        if len(dirty) > 10:
+            lines.append(f"    - ... and {len(dirty) - 10} more")
+    else:
+        lines.append("- uncommitted: none (clean tree)")
+
+    log = run_git(root, "log", "-5", "--oneline", "--no-decorate")
+    if log and log.strip():
+        lines.append("- recent commits:")
+        for entry in log.strip().splitlines():
+            lines.append(f"    - {entry}")
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# file analysis
+# --------------------------------------------------------------------------
+
+class FileInfo:
+    """One repo file: its symbols, its imports, and the signals used to rank it."""
+
+    def __init__(self, path: str, size: int):
+        self.path = path
+        self.size = size
+        self.lines = 0
+        self.doc: Optional[str] = None
+        self.symbols: List[Tuple[int, int, str]] = []  # (lineno, depth, text)
+        self.imports: List[tuple] = []
+        self.importers: Set[str] = set()
+        self.churn = 0
+        self.entry = False
+        self.executable = False
+
+    @property
+    def in_degree(self) -> int:
+        return len(self.importers)
+
+    @property
+    def score(self) -> int:
+        return (4 * self.in_degree) + min(self.churn, 10) + (6 if self.entry else 0) + (1 if self.symbols else 0)
+
+
+def _elide(text: str, limit: int) -> str:
+    """Truncate visibly, so a cut signature never reads as a complete one."""
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _fmt_signature(node, drop_self: bool) -> str:
+    try:
+        params = ast.unparse(node.args)
+    except Exception:
+        params = "..."
+    if drop_self:
+        for prefix in ("self, ", "cls, "):
+            if params.startswith(prefix):
+                params = params[len(prefix):]
+                break
+        if params in ("self", "cls"):
+            params = ""
+    sig = f"{node.name}({params})"
+    if node.returns is not None:
+        with contextlib.suppress(Exception):
+            sig += f" -> {ast.unparse(node.returns)}"
+    prefix = "async " if isinstance(node, ast.AsyncFunctionDef) else ""
+    return _elide(prefix + sig, 88)
+
+
+def _first_doc_line(node) -> Optional[str]:
+    try:
+        doc = ast.get_docstring(node)
+    except Exception:
+        return None
+    if not doc:
+        return None
+    return doc.strip().splitlines()[0].strip()[:100]
+
+
+def parse_python(content: str) -> Tuple[Optional[str], List[Tuple[int, int, str]], List[tuple]]:
+    """Symbols with signatures + line numbers, plus import specs for the graph."""
+    symbols: List[Tuple[int, int, str]] = []
+    imports: List[tuple] = []
+    try:
+        tree = ast.parse(content)
+    except Exception:
+        # Unparseable (syntax error, different python dialect): degrade to names only.
+        for i, line in enumerate(content.splitlines(), 1):
+            m = re.match(r"^(?:class|def|async def)\s+([A-Za-z0-9_]+)", line.strip())
+            if m:
+                symbols.append((i, 0, m.group(0)))
+        return None, symbols, imports
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.extend(("py_abs", a.name) for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                if node.module:
+                    imports.append(("py_rel", node.level, node.module))
+                else:
+                    imports.extend(("py_rel", node.level, a.name) for a in node.names)
+            elif node.module:
+                imports.append(("py_abs", node.module))
+
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            symbols.append((node.lineno, 0, f"class {node.name}"))
+            for sub in node.body:
+                if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if sub.name.startswith("_") and sub.name != "__init__":
+                        continue
+                    symbols.append((sub.lineno, 1, _fmt_signature(sub, drop_self=True)))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            symbols.append((node.lineno, 0, _fmt_signature(node, drop_self=False)))
+
+    return _first_doc_line(tree), symbols, imports
+
+
+GENERIC_PATTERNS = {
+    ".js": [r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class)\s+([A-Za-z0-9_$]+)",
+            r"^export\s+const\s+([A-Za-z0-9_$]+)"],
+    ".jsx": [r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class)\s+([A-Za-z0-9_$]+)",
+             r"^export\s+const\s+([A-Za-z0-9_$]+)"],
+    ".ts": [r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|enum)\s+([A-Za-z0-9_$]+)",
+            r"^export\s+const\s+([A-Za-z0-9_$]+)"],
+    ".tsx": [r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|enum)\s+([A-Za-z0-9_$]+)",
+             r"^export\s+const\s+([A-Za-z0-9_$]+)"],
+    ".go": [r"^func\s+(?:\([^\)]+\)\s+)?([A-Za-z0-9_]+)", r"^type\s+([A-Za-z0-9_]+)\s+(?:struct|interface)"],
+    ".rs": [r"^(?:pub\s+)?(?:fn|struct|enum|trait|type)\s+([A-Za-z0-9_]+)"],
+    ".c": [r"^[A-Za-z0-9_ *]+\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*\{"],
+    ".cpp": [r"^(?:class|struct)\s+([A-Za-z0-9_]+)", r"^[A-Za-z0-9_ *:]+\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*\{"],
+    ".h": [r"^(?:class|struct)\s+([A-Za-z0-9_]+)", r"^[A-Za-z0-9_ *:]+\s+([A-Za-z0-9_]+)\s*\([^)]*\);"],
+}
+
+JS_IMPORT_RE = re.compile(r"""(?:from|require\()\s*['"]([^'"]+)['"]""")
+
+
+def parse_generic(content: str, ext: str) -> Tuple[Optional[str], List[Tuple[int, int, str]], List[tuple]]:
+    symbols: List[Tuple[int, int, str]] = []
+    imports: List[tuple] = []
+    regexes = [re.compile(p) for p in GENERIC_PATTERNS.get(ext, [])]
+
+    for i, raw in enumerate(content.splitlines(), 1):
+        line = raw.strip()
+        if ext in JS_EXTS:
+            # Keep bare specifiers too: they may be tsconfig path aliases (`@/lib/x`),
+            # which in an aliased project vastly outnumber relative imports.
+            imports.extend(("js_spec", spec) for spec in JS_IMPORT_RE.findall(line))
+        for c in regexes:
+            if c.match(line):
+                symbols.append((i, 0, _elide(line.rstrip("{ ").strip(), 88)))
+                break
+    return None, symbols, imports
+
+
+SHEBANG_EXTS = {"python": ".py", "node": ".js", "deno": ".ts", "bun": ".ts"}
+
+
+def _sniff_shebang(full: Path) -> Optional[str]:
+    """Map an extensionless script to a parser via its shebang."""
+    try:
+        with open(full, "rb") as f:
+            first = f.readline(200).decode("utf-8", errors="ignore")
+    except OSError:
+        return None
+    if not first.startswith("#!"):
+        return None
+    for name, ext in SHEBANG_EXTS.items():
+        if name in first:
+            return ext
+    return None
+
+
+def analyze_file(root: Path, rel: str) -> Optional[FileInfo]:
+    full = root / rel
+    try:
+        st = full.stat()
+    except OSError:
+        return None
+    info = FileInfo(rel, st.st_size)
+    info.executable = bool(st.st_mode & 0o111)
+
+    ext = Path(rel).suffix.lower()
+    if ext not in CODE_EXTS and info.executable:
+        ext = _sniff_shebang(full) or ext  # extensionless scripts in bin/ are common
+    if ext not in CODE_EXTS or st.st_size > MAX_PARSE_BYTES:
+        return info
+
+    try:
+        content = full.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return info
+
+    info.lines = content.count("\n") + 1
+    if ext == ".py":
+        info.doc, info.symbols, info.imports = parse_python(content)
+    else:
+        info.doc, info.symbols, info.imports = parse_generic(content, ext)
+    return info
+
+
+# --------------------------------------------------------------------------
+# import graph
+# --------------------------------------------------------------------------
+
+def build_python_index(paths: Set[str]) -> Dict[str, Set[str]]:
+    """Map every dotted-path suffix of each module to the file(s) providing it.
+
+    So `backend/db.py` is reachable as "db", "backend.db", ... which lets an
+    `from backend.db import X` in a src-layout project resolve without knowing
+    where sys.path would have started.
+    """
+    index: Dict[str, Set[str]] = {}
+    for path in paths:
+        if not path.endswith(".py"):
+            continue
+        parts = path[:-3].split("/")
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        if not parts:
+            continue
+        for i in range(len(parts)):
+            index.setdefault(".".join(parts[i:]), set()).add(path)
+    return index
+
+
+def _resolve_py_module(module: str, index: Dict[str, Set[str]]) -> Optional[str]:
+    hits = index.get(module)
+    if hits and len(hits) == 1:  # ambiguous names would create false edges
+        return next(iter(hits))
+    return None
+
+
+_JSONC_RE = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/', re.S)
+
+
+def _load_jsonc(path: Path) -> dict:
+    """Parse JSON that may carry comments/trailing commas (tsconfig.json does)."""
+    raw = path.read_text(encoding="utf-8", errors="ignore")
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    stripped = _JSONC_RE.sub(lambda m: m.group(0) if m.group(0).startswith('"') else "", raw)
+    return json.loads(re.sub(r",\s*([}\]])", r"\1", stripped))
+
+
+def load_path_aliases(root: Path, paths: Set[str]) -> List[Tuple[str, List[str]]]:
+    """(prefix, [target dirs]) from tsconfig/jsconfig `compilerOptions.paths`.
+
+    Without this, an aliased project's import graph is nearly empty: in a typical
+    Next.js repo `@/...` imports outnumber relative ones by more than 10:1.
+    """
+    aliases: List[Tuple[str, List[str]]] = []
+    for cfg in ("tsconfig.json", "jsconfig.json"):
+        if cfg not in paths:
+            continue
+        try:
+            opts = _load_jsonc(root / cfg).get("compilerOptions") or {}
+        except Exception:
+            continue
+        base_dir = os.path.normpath(str(opts.get("baseUrl") or "."))
+        for pattern, targets in (opts.get("paths") or {}).items():
+            prefix = pattern.replace("*", "")
+            if not prefix:
+                continue
+            dirs = [os.path.normpath(f"{base_dir}/{str(t).replace('*', '')}") for t in targets]
+            aliases.append((prefix, dirs))
+    return aliases
+
+
+def _try_candidates(norm: str, paths: Set[str]) -> Optional[str]:
+    if norm.startswith(".."):
+        return None
+    for cand in [norm] + [norm + e for e in JS_EXTS] + [f"{norm}/index{e}" for e in JS_EXTS]:
+        if cand in paths:
+            return cand
+    return None
+
+
+def _resolve_rel_path(source: str, spec: str, paths: Set[str]) -> Optional[str]:
+    try:
+        norm = os.path.normpath((Path(source).parent / spec).as_posix())
+    except Exception:
+        return None
+    return _try_candidates(norm, paths)
+
+
+def _resolve_alias(spec: str, aliases: List[Tuple[str, List[str]]], paths: Set[str]) -> Optional[str]:
+    for prefix, dirs in aliases:
+        if not spec.startswith(prefix):
+            continue
+        rest = spec[len(prefix):]
+        for target_dir in dirs:
+            hit = _try_candidates(os.path.normpath(f"{target_dir}/{rest}"), paths)
+            if hit:
+                return hit
+    return None
+
+
+def build_import_graph(infos: Dict[str, FileInfo], py_index: Dict[str, Set[str]],
+                       aliases: List[Tuple[str, List[str]]]) -> None:
+    """Populate `importers` so in-degree can rank structurally central modules.
+
+    ponytail: resolves Python (via ast) and relative JS/TS specifiers only. Go
+    and Rust get symbols and churn ranking but no edges — a guessy resolver
+    would inject false edges, and wrong ranking is worse than absent ranking.
+    """
+    paths = set(infos)
+    for source, info in infos.items():
+        for spec in info.imports:
+            target = None
+            if spec[0] == "py_abs":
+                target = _resolve_py_module(spec[1], py_index)
+            elif spec[0] == "py_rel":
+                _, level, module = spec
+                base = Path(source).parent
+                for _ in range(level - 1):
+                    base = base.parent
+                stem = (base / module.replace(".", "/")).as_posix().lstrip("./")
+                for cand in (f"{stem}.py", f"{stem}/__init__.py"):
+                    if cand in paths:
+                        target = cand
+                        break
+            elif spec[0] == "js_spec":
+                js_spec = spec[1]
+                target = (_resolve_rel_path(source, js_spec, paths) if js_spec.startswith(".")
+                          else _resolve_alias(js_spec, aliases, paths))
+
+            if target and target != source:
+                infos[target].importers.add(source)
+
+
+# --------------------------------------------------------------------------
+# entry points
+# --------------------------------------------------------------------------
+
+def detect_entry_points(root: Path, infos: Dict[str, FileInfo], py_index: Dict[str, Set[str]]) -> None:
+    for rel, info in infos.items():
+        parts = rel.split("/")
+        # An executable file counts as an entry point only near the surface of the
+        # repo or under bin/. Deep executables are usually helper scripts sourced by
+        # something else, and labelling them "entry point" is noise.
+        shallow = len(parts) <= 2 or "bin" in parts[:-1]
+        stem, ext = os.path.splitext(parts[-1])
+        routed = ext in JS_EXTS and (
+            stem == "middleware" or (stem in ROUTE_STEMS and {"app", "pages"} & set(parts[:-1]))
+        )
+        if parts[-1] in ENTRY_NAMES or routed or (info.executable and shallow):
+            info.entry = True
+
+    for rel in list(infos):
+        name = rel.rsplit("/", 1)[-1]
+        try:
+            if name == "pyproject.toml":
+                data = tomllib.loads((root / rel).read_text(encoding="utf-8", errors="ignore"))
+                targets = (data.get("project", {}).get("scripts") or {}).values()
+                for target in targets:
+                    hit = _resolve_py_module(str(target).split(":")[0], py_index)
+                    if hit:
+                        infos[hit].entry = True
+            elif name == "package.json":
+                data = json.loads((root / rel).read_text(encoding="utf-8", errors="ignore"))
+                base = Path(rel).parent
+                raw = data.get("bin") or {}
+                targets = list(raw.values()) if isinstance(raw, dict) else [raw]
+                if data.get("main"):
+                    targets.append(data["main"])
+                for target in targets:
+                    cand = os.path.normpath((base / str(target)).as_posix())
+                    if cand in infos:
+                        infos[cand].entry = True
+        except Exception:
             continue
 
-        dirnames[:] = [d for d in dirnames if not should_ignore(rel_dir / d, ignores)]
 
-        for f in sorted(filenames):
-            rel_file = rel_dir / f if rel_dir != Path(".") else Path(f)
-            if should_ignore(rel_file, ignores):
-                continue
-            full_path = Path(dirpath) / f
-            try:
-                size = full_path.stat().st_size
-                if size > 500_000:  # skip files > 500KB
-                    continue
-                ext = rel_file.suffix.lower()
-                symbols = []
-                if ext == ".py":
-                    symbols = extract_python_symbols(full_path.read_text(encoding="utf-8", errors="ignore"))
-                elif ext in {".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".c", ".cpp", ".h"}:
-                    symbols = extract_generic_symbols(full_path.read_text(encoding="utf-8", errors="ignore"), ext)
+# --------------------------------------------------------------------------
+# repo map rendering
+# --------------------------------------------------------------------------
 
-                file_entries.append((str(rel_file), size, symbols))
-            except Exception:
-                continue
+def collect_repo(root: Path) -> Dict[str, FileInfo]:
+    infos: Dict[str, FileInfo] = {}
+    for rel in list_files(root):
+        info = analyze_file(root, rel)
+        if info is not None:
+            infos[rel] = info
 
-    file_entries.sort(key=lambda x: x[0])
-    lines = ["# Repository Map", "", f"Total mapped files: {len(file_entries)}", ""]
-    for path, size, symbols in file_entries[:max_files]:
-        lines.append(f"- `{path}` ({size} B)")
-        for s in symbols[:6]:
-            lines.append(f"    * {s}")
-    return "\n".join(lines)
+    py_index = build_python_index(set(infos))
+    build_import_graph(infos, py_index, load_path_aliases(root, set(infos)))
+    detect_entry_points(root, infos, py_index)
+    for rel, count in get_churn(root).items():
+        if rel in infos:
+            infos[rel].churn = count
+    return infos
+
+
+def _render_symbol(lineno: int, depth: int, text: str) -> str:
+    return f"  :{str(lineno).ljust(5)}{'  ' * depth}{text}"
+
+
+GENERIC_STEMS = {"index", "page", "layout", "route", "main", "mod", "__init__"}
+
+
+def _importer_label(path: str) -> str:
+    """Name an importing file. Bare stems collide in route-based projects, where
+    a dozen distinct files are all called `page` — qualify those with their dir."""
+    p = Path(path)
+    if p.stem in GENERIC_STEMS and p.parent.name:
+        return f"{p.parent.name}/{p.stem}"
+    return p.stem
+
+
+def _file_header(info: FileInfo) -> str:
+    bits = []
+    if info.lines:
+        bits.append(f"{info.lines} ln")
+    if info.importers:
+        names = sorted({_importer_label(p) for p in info.importers})
+        shown = ", ".join(names[:4])
+        if len(names) > 4:
+            shown += f", +{len(names) - 4}"
+        bits.append(f"← {shown}")
+    if info.churn:
+        bits.append(f"{info.churn} commit{'s' if info.churn != 1 else ''}/{CHURN_DAYS}d")
+    if info.entry:
+        bits.append("entry point")
+    suffix = f" · {' · '.join(bits)}" if bits else ""
+    return f"`{info.path}`{suffix}"
+
+
+def _render_detail(info: FileInfo) -> str:
+    out = [_file_header(info)]
+    if info.doc:
+        out.append(f'  "{info.doc}"')
+    for lineno, depth, text in info.symbols[:12]:
+        out.append(_render_symbol(lineno, depth, text))
+    if len(info.symbols) > 12:
+        out.append(f"  ... +{len(info.symbols) - 12} more symbols")
+    return "\n".join(out)
+
+
+def _render_compact(info: FileInfo) -> str:
+    tops = [f":{ln} {txt.split('(')[0]}" for ln, depth, txt in info.symbols if depth == 0][:6]
+    tail = f" · {' · '.join(tops)}" if tops else ""
+    return f"{_file_header(info)}{tail}"
+
+
+def _group_dirs(infos: List[FileInfo], top_level_only: bool) -> List[str]:
+    groups: Dict[str, List[FileInfo]] = {}
+    for info in infos:
+        parent = Path(info.path).parent
+        key = (parent.parts[0] if top_level_only and parent.parts else parent.as_posix())
+        groups.setdefault("." if key == "." else key.rstrip("/") + "/", []).append(info)
+
+    out = []
+    for parent in sorted(groups):
+        members = groups[parent]
+        exts = sorted({Path(m.path).suffix or "(no ext)" for m in members})
+        if len(members) <= 3 and not top_level_only:
+            out.append(f"- `{parent}` — " + ", ".join(f"`{Path(m.path).name}`" for m in members))
+        else:
+            out.append(f"- `{parent}` — {len(members)} files ({', '.join(exts[:4])})")
+    return out
+
+
+def _collapse_dirs(infos: List[FileInfo], limit: int) -> List[str]:
+    """Summarise collapsed files, rolling up to top-level dirs if the list is itself
+    too long — an unbudgeted tail would quietly blow the caller's budget."""
+    lines = _group_dirs(infos, top_level_only=False)
+    if sum(len(l) + 1 for l in lines) <= limit:
+        return lines
+    return _group_dirs(infos, top_level_only=True)
+
+
+def generate_repo_map(root: Path, budget: int = MAP_BUDGET_DEFAULT) -> str:
+    infos = collect_repo(root)
+    total = len(infos)
+    total_lines = sum(i.lines for i in infos.values())
+
+    ranked = sorted(infos.values(), key=lambda i: (-i.score, i.path))
+    head = [
+        "# Repository Map",
+        "",
+        f"{total} files · {total_lines} lines of parsed code · "
+        f"ranked by import in-degree + {CHURN_DAYS}d churn + entry points",
+    ]
+
+    entries = [i for i in ranked if i.entry]
+    if entries:
+        head += ["", "## Entry points", ""]
+        head += [f"- `{i.path}`" for i in entries[:10]]
+        if len(entries) > 10:
+            head.append(f"- _... +{len(entries) - 10} more entry points (ranked; see the map below)_")
+
+    core_blocks: List[str] = []
+    support_blocks: List[str] = []
+    collapsed: List[FileInfo] = []
+    detailed = 0
+    used = sum(len(l) + 1 for l in head)
+    truncated = False
+
+    for info in ranked:
+        # A widely-imported file earns a line even with no parsed symbols — its
+        # importer list is the point, and losing it to the collapsed bucket hides
+        # exactly the kind of shared module the ranking exists to surface.
+        if not info.symbols and info.in_degree < 2:
+            collapsed.append(info)
+            continue
+        is_core = info.entry or info.in_degree >= 2
+        block = _render_detail(info) if is_core else _render_compact(info)
+        if truncated or used + len(block) + 2 > budget - COLLAPSE_RESERVE:
+            truncated = True
+            collapsed.append(info)
+            continue
+        used += len(block) + 2
+        (core_blocks if is_core else support_blocks).append(block)
+        detailed += 1
+
+    out = list(head)
+    if core_blocks:
+        out += ["", "## Core modules", ""]
+        out.append("\n\n".join(core_blocks))
+    if support_blocks:
+        out += ["", "## Supporting files", ""]
+        out.append("\n\n".join(support_blocks))
+    if collapsed:
+        out += ["", "## Other files", ""]
+        out += _collapse_dirs(collapsed, COLLAPSE_RESERVE)
+
+    out += ["", f"_Detailed {detailed} of {total} files; {len(collapsed)} collapsed above._"]
+    if truncated:
+        out.append(
+            f"_Output hit the {budget}-char budget — lower-ranked files were collapsed, "
+            f"not dropped. Raise with `agent-ctx map --budget N`, or use Grep for exact locations._"
+        )
+    return "\n".join(out)
+
+
+# --------------------------------------------------------------------------
+# commands
+# --------------------------------------------------------------------------
+
+def _split_sections(text: str) -> Tuple[str, List[Tuple[str, str]]]:
+    """Split markdown into (preamble, [(heading, body)]) at its dominant heading level.
+
+    The level is detected rather than assumed: real files disagree with the template
+    (titirek writes `## ADR-001: ...`, this repo writes `### [date] Title`).
+    """
+    lines = text.splitlines()
+    counts = {lv: sum(1 for l in lines if re.match(rf"^#{{{lv}}}\s+\S", l)) for lv in (2, 3, 4)}
+    level = max(counts, key=lambda lv: (counts[lv], -lv))
+    if counts[level] == 0:
+        return text, []
+
+    pat = re.compile(rf"^#{{{level}}}\s+\S")
+    preamble: List[str] = []
+    sections: List[List] = []
+    for line in lines:
+        if pat.match(line):
+            sections.append([line, []])
+        elif sections:
+            sections[-1][1].append(line)
+        else:
+            preamble.append(line)
+    return "\n".join(preamble).strip(), [(h, "\n".join(b).rstrip()) for h, b in sections]
+
+
+def clip_decisions(text: str, limit: int) -> str:
+    """Keep every ADR *title*, expand bodies newest-first until the budget runs out.
+
+    Positional clipping is wrong for ADRs: they are not news, and the oldest entries
+    are usually the load-bearing invariants. Titles cost ~60 chars each, so the full
+    list of decisions stays visible indefinitely and any body can still be read from
+    the file.
+    """
+    preamble, sections = _split_sections(text)
+    if not sections or len(text) <= limit:
+        return text
+
+    used = len(preamble) + sum(len(h) + 2 for h, _ in sections) + 160
+    expanded = set()
+    for idx in range(len(sections) - 1, -1, -1):  # newest entries are appended last
+        body = sections[idx][1]
+        if used + len(body) + 2 > limit:
+            continue
+        used += len(body) + 2
+        expanded.add(idx)
+
+    out = [preamble] if preamble else []
+    for idx, (heading, body) in enumerate(sections):
+        out.append(f"{heading}\n{body}".rstrip() if idx in expanded
+                   else f"{heading}\n- _(body trimmed to budget — read `.agents/decisions.md`)_")
+    hidden = len(sections) - len(expanded)
+    if hidden:
+        out.append(f"_{hidden} of {len(sections)} decisions shown by title only; "
+                   f"no decision is hidden entirely._")
+    return "\n\n".join(out)
+
+
+MEMORY_PRIORITY = (
+    ("invariant", "rule", "architecture", "constraint"),
+    ("gotcha", "vocab", "domain", "glossar", "edge"),
+)
+
+
+def _memory_priority(heading: str) -> int:
+    low = heading.lower()
+    for rank, keywords in enumerate(MEMORY_PRIORITY):
+        if any(k in low for k in keywords):
+            return rank
+    return len(MEMORY_PRIORITY)  # epics/status: the most perishable, trimmed first
+
+
+def clip_memory(text: str, limit: int) -> str:
+    """Trim by section priority, not file position.
+
+    Invariants and gotchas outlive "active epics", but epics sit first in the
+    template — clipping from the top keeps the changelog and drops the durable rules.
+    """
+    preamble, sections = _split_sections(text)
+    if not sections or len(text) <= limit:
+        return text
+
+    order = sorted(range(len(sections)), key=lambda i: (_memory_priority(sections[i][0]), i))
+    used = len(preamble) + sum(len(sections[i][0]) + 2 for i in range(len(sections))) + 160
+    kept: Dict[int, str] = {}
+    for i in order:
+        body = sections[i][1]
+        room = limit - used
+        if len(body) + 2 <= room:
+            kept[i] = body
+            used += len(body) + 2
+        elif room > 300:
+            # Partially include rather than skip: a greedy fill would drop the single
+            # most valuable section whenever it is the largest, and backfill with
+            # lower-priority ones. Priority has to dominate size.
+            cut = body[:room - 90]
+            kept[i] = cut[:cut.rfind("\n") if "\n" in cut else len(cut)].rstrip() + \
+                "\n- _(section truncated to budget — read `.agents/memory.md`)_"
+            used = limit
+        else:
+            break
+
+    out = [preamble] if preamble else []
+    for idx, (heading, body) in enumerate(sections):
+        out.append(f"{heading}\n{kept[idx]}".rstrip() if idx in kept
+                   else f"{heading}\n- _(section trimmed to budget — read `.agents/memory.md`)_")
+    dropped = len(sections) - len(kept)
+    if dropped:
+        out.append(f"_{dropped} of {len(sections)} sections trimmed, lowest-priority first "
+                   f"(invariants and gotchas are kept ahead of status)._")
+    return "\n\n".join(out)
+
+
+def resolve_budget(value: Optional[str], default: int) -> int:
+    """Accept a raw character count or a preset name; env var sets the session default."""
+    raw = value or os.environ.get("AGENT_CTX_BUDGET") or "default"
+    if raw == "default":
+        return default
+    if raw.isdigit():
+        return int(raw)
+    if raw in BUDGET_PRESETS:
+        return BUDGET_PRESETS[raw]
+    names = "/".join(["default", *BUDGET_PRESETS])
+    raise SystemExit(f"--budget: expected a character count or one of {names}, got {raw!r}")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -195,29 +846,21 @@ def cmd_init(args: argparse.Namespace) -> int:
     agents_dir = root / ".agents"
     agents_dir.mkdir(exist_ok=True)
 
-    mem_file = agents_dir / "memory.md"
-    dec_file = agents_dir / "decisions.md"
+    for name, template in (("memory.md", DEFAULT_MEMORY_TEMPLATE), ("decisions.md", DEFAULT_DECISIONS_TEMPLATE)):
+        target = agents_dir / name
+        if not target.exists():
+            target.write_text(template, encoding="utf-8")
+            print(f"Created {target.relative_to(root)}")
+        else:
+            print(f"Already exists: {target.relative_to(root)}")
+
     act_file = agents_dir / "activity.jsonl"
-    map_file = agents_dir / "repo_map.md"
-
-    if not mem_file.exists():
-        mem_file.write_text(DEFAULT_MEMORY_TEMPLATE, encoding="utf-8")
-        print(f"Created {mem_file.relative_to(root)}")
-    else:
-        print(f"Already exists: {mem_file.relative_to(root)}")
-
-    if not dec_file.exists():
-        dec_file.write_text(DEFAULT_DECISIONS_TEMPLATE, encoding="utf-8")
-        print(f"Created {dec_file.relative_to(root)}")
-    else:
-        print(f"Already exists: {dec_file.relative_to(root)}")
-
     if not act_file.exists():
         act_file.touch()
         print(f"Created {act_file.relative_to(root)}")
 
-    repo_map = generate_repo_map(root)
-    map_file.write_text(repo_map, encoding="utf-8")
+    map_file = agents_dir / "repo_map.md"
+    map_file.write_text(generate_repo_map(root), encoding="utf-8")
     print(f"Generated {map_file.relative_to(root)}")
     print("Initialization complete.")
     return 0
@@ -225,13 +868,13 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_map(args: argparse.Namespace) -> int:
     root = find_repo_root()
-    agents_dir = root / ".agents"
-    agents_dir.mkdir(exist_ok=True)
-    map_content = generate_repo_map(root)
+    map_content = generate_repo_map(root, budget=resolve_budget(args.budget, MAP_BUDGET_DEFAULT))
 
     if args.stdout:
         print(map_content)
     else:
+        agents_dir = root / ".agents"
+        agents_dir.mkdir(exist_ok=True)
         map_file = agents_dir / "repo_map.md"
         map_file.write_text(map_content, encoding="utf-8")
         print(f"Updated {map_file.relative_to(root)}")
@@ -283,12 +926,9 @@ def cmd_history(args: argparse.Namespace) -> int:
     selected = records[-args.limit:] if args.limit > 0 else records
     for r in reversed(selected):
         ts = r.get("timestamp", "")[:19].replace("T", " ")
-        action = r.get("action", "")
-        summary = r.get("summary", "")
         files = ", ".join(r.get("files", []))
-        branch = r.get("branch", "")
-        print(f"[{ts}] ({branch}) {action}")
-        print(f"  Summary: {summary}")
+        print(f"[{ts}] ({r.get('branch') or 'unknown'}) {r.get('action', '')}")
+        print(f"  Summary: {r.get('summary', '')}")
         if files:
             print(f"  Files: {files}")
         print()
@@ -298,93 +938,268 @@ def cmd_history(args: argparse.Namespace) -> int:
 def cmd_dump(args: argparse.Namespace) -> int:
     root = find_repo_root()
     agents_dir = root / ".agents"
+    total = resolve_budget(getattr(args, "budget", None), DUMP_TOTAL_BUDGET)
+    # Prose stores each get a third; the map takes what is left. Scaling with the
+    # total is what makes a larger preset help every section, not just the map.
+    prose_budget = total // 3
 
     out = [f"# Agent Context Snapshot ({root.name})\n"]
+
+    state = get_working_state(root)
+    if state:
+        out.append("## Working state\n")
+        out.append(state)
+        out.append("\n---\n")
 
     mem_file = agents_dir / "memory.md"
     if mem_file.is_file():
         out.append("## Project Memory\n")
-        out.append(mem_file.read_text(encoding="utf-8", errors="ignore").strip())
+        out.append(clip_memory(mem_file.read_text(encoding="utf-8", errors="ignore").strip(), prose_budget))
         out.append("\n---\n")
 
     dec_file = agents_dir / "decisions.md"
     if dec_file.is_file():
         out.append("## Architecture Decisions\n")
-        out.append(dec_file.read_text(encoding="utf-8", errors="ignore").strip())
+        out.append(clip_decisions(dec_file.read_text(encoding="utf-8", errors="ignore").strip(), prose_budget))
         out.append("\n---\n")
 
-    out.append("## Structure & Symbol Map (live)\n")
-    out.append(generate_repo_map(root).strip())
-    out.append("\n---\n")
-
+    # Build the activity tail before the map so the map's share is what is genuinely
+    # left over — otherwise DUMP_TOTAL_BUDGET would not be a total at all.
+    tail: List[str] = []
     act_file = agents_dir / "activity.jsonl"
     if act_file.is_file():
         lines = act_file.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
         if lines:
-            out.append("## Recent Activity\n")
+            tail.append("## Recent Activity\n")
             for l in lines[-5:]:
                 try:
                     r = json.loads(l)
                     ts = r.get("timestamp", "")[:10]
-                    out.append(f"- **{ts} [{r.get('action')}]**: {r.get('summary')} (files: {', '.join(r.get('files', [])) or 'none'})")
+                    tail.append(f"- **{ts} [{r.get('action')}]**: {r.get('summary')} (files: {', '.join(r.get('files', [])) or 'none'})")
                 except Exception:
                     pass
+
+    spent = sum(len(chunk) for chunk in out) + sum(len(chunk) for chunk in tail)
+    out.append("## Structure & Symbol Map (live)\n")
+    out.append(generate_repo_map(root, budget=max(DUMP_MAP_MIN_BUDGET, total - spent)).strip())
+    out.append("\n---\n")
+    out.extend(tail)
 
     print("\n".join(out))
     return 0
 
 
+# --------------------------------------------------------------------------
+# self-test
+# --------------------------------------------------------------------------
+
+def _build_fixture(root: Path) -> None:
+    (root / "src").mkdir()
+    (root / ".agents").mkdir()
+    (root / "src" / "core.py").write_text(
+        '"""Core engine for the fixture."""\n'
+        "class CoreApp:\n"
+        "    def run(self, mode: str = 'fast') -> bool:\n"
+        "        return True\n"
+        "    def _private(self):\n"
+        "        pass\n"
+        "\n"
+        "async def helper(a, b=2, *rest) -> int:\n"
+        "    return 0\n"
+    )
+    (root / "src" / "leaf.py").write_text("def unused_leaf():\n    pass\n")
+    tool = root / "bin_tool"
+    tool.write_text("#!/usr/bin/env python3\ndef extensionless_main():\n    pass\n")
+    tool.chmod(0o755)
+    for name in ("one", "two", "three"):
+        (root / "src" / f"{name}.py").write_text(f"from src.core import CoreApp\n\ndef {name}():\n    pass\n")
+    (root / "src" / "index.ts").write_text(
+        "import { CoreApp } from './widget';\nexport function startServer() {}\nexport class Handler {}\n"
+    )
+    (root / "src" / "widget.ts").write_text("export class Widget {}\n")
+    # tsconfig path aliases: the dominant import style in aliased JS/TS projects.
+    (root / "tsconfig.json").write_text(
+        '{\n  // a comment, because tsconfig is JSONC\n'
+        '  "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./src/*"] } },\n}\n'
+    )
+    (root / "src" / "shared.ts").write_text("export const shared = 1;\n")
+    app = root / "src" / "app" / "dash"
+    app.mkdir(parents=True)
+    (app / "page.tsx").write_text(
+        'import { shared } from "@/shared";\nimport { Widget } from "@/widget";\n'
+        "export default function Page() {}\n"
+    )
+    (root / "src" / "app" / "layout.tsx").write_text(
+        'import { shared } from "@/shared";\nexport default function Layout() {}\n'
+    )
+    (root / ".agents" / "memory.md").write_text(DEFAULT_MEMORY_TEMPLATE)
+    (root / ".agents" / "decisions.md").write_text(DEFAULT_DECISIONS_TEMPLATE)
+
+
+def _dump_to_string(root: Path) -> str:
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(root)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cmd_dump(argparse.Namespace())
+        return buf.getvalue()
+    finally:
+        os.chdir(old_cwd)
+
+
+def _test_symbols_and_graph(root: Path) -> None:
+    content = generate_repo_map(root)
+
+    assert "class CoreApp" in content, "python classes should appear"
+    assert "run(mode: str='fast') -> bool" in content, f"signatures must be rendered, got:\n{content}"
+    assert "async helper(a, b=2, *rest) -> int" in content, "async + full signature must be rendered"
+    assert "_private" not in content, "private methods should be filtered out"
+    assert "export function startServer" in content, "generic-language symbols should appear"
+    assert '"Core engine for the fixture."' in content, "module docstring should be surfaced"
+
+    core_line = next(l for l in content.splitlines() if l.startswith("`src/core.py`"))
+    assert ":2 " in content and ":8 " in content, f"line numbers must be emitted:\n{content}"
+    assert "← one, three, two" in core_line, f"in-degree importers must be listed, got: {core_line}"
+
+    assert content.index("src/core.py") < content.index("src/leaf.py"), \
+        "imported modules must rank above unimported leaves"
+    widget_line = next(l for l in content.splitlines() if l.startswith("`src/widget.ts`"))
+    assert "src/index" in widget_line and "dash/page" in widget_line, \
+        f"relative and aliased imports must both produce edges, and generic stems must be "\
+        f"qualified by their directory, got: {widget_line}"
+    assert "extensionless_main" in content, \
+        "extensionless executables should be parsed via their shebang"
+
+    shared_line = next(l for l in content.splitlines() if l.startswith("`src/shared.ts`"))
+    assert "app/layout" in shared_line and "dash/page" in shared_line, \
+        f"tsconfig path aliases (@/x) must produce graph edges, got: {shared_line}"
+    assert "export default function Page" in content, \
+        "`export default function` (the Next.js page form) must be captured as a symbol"
+
+    entry_block = content.split("## Core modules")[0]
+    assert "src/app/dash/page.tsx" in entry_block and "src/app/layout.tsx" in entry_block, \
+        "file-system route files should be detected as entry points"
+    assert "src/index.ts" not in entry_block, \
+        "barrel index files must NOT be treated as entry points"
+
+
+def _test_budget_is_honest(root: Path) -> None:
+    tiny = generate_repo_map(root, budget=400)
+    assert "budget" in tiny and "collapsed" in tiny, f"truncation must be announced:\n{tiny}"
+    header_total = int(re.search(r"^(\d+) files", tiny, re.M).group(1))
+    listed = len(re.findall(r"^`", tiny, re.M))
+    assert listed < header_total, "tiny budget should actually reduce detail"
+    assert "Detailed" in tiny, "must state how many of the total were detailed"
+
+
+def _test_git_integration(root: Path) -> None:
+    if subprocess.run(["git", "--version"], capture_output=True).returncode != 0:
+        print("  (skipped git checks: git unavailable)")
+        return
+
+    for cmd in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        subprocess.run(["git", "-C", str(root), *cmd], capture_output=True, check=True)
+    (root / ".gitignore").write_text("*.jsonl\n!keep/important.jsonl\nlogs/debug.txt\ntmp*\n")
+    (root / "keep").mkdir()
+    (root / "keep" / "important.jsonl").write_text("{}\n")
+    (root / "logs").mkdir()
+    (root / "logs" / "debug.txt").write_text("x\n")
+    (root / "logs" / "other.txt").write_text("x\n")
+    (root / "tmpfile.txt").write_text("x\n")
+
+    files = set(list_files(root))
+    assert "keep/important.jsonl" in files, "gitignore negations must be honored"
+    assert "logs/debug.txt" not in files, "path-scoped ignore patterns must be honored"
+    assert "logs/other.txt" in files, "unignored siblings must survive"
+    assert "tmpfile.txt" not in files, "trailing-glob ignore patterns must be honored"
+
+    subprocess.run(["git", "-C", str(root), "add", "-A"], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "fixture commit"], capture_output=True, check=True)
+    (root / "src" / "leaf.py").write_text("def unused_leaf():\n    return 1\n")
+
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "-b", "fixture-branch"], capture_output=True, check=True)
+    assert get_git_branch(root) == "fixture-branch", \
+        f"branch must be read from git, not assumed, got {get_git_branch(root)!r}"
+
+    subprocess.run(["git", "-C", str(root), "checkout", "--detach", "-q"], capture_output=True, check=True)
+    detached = get_git_branch(root)
+    assert detached and detached.startswith("detached@"), \
+        f"detached HEAD must be reported as detached, not the literal 'HEAD', got {detached!r}"
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "-"], capture_output=True, check=True)
+
+    state = get_working_state(root)
+    assert "fixture commit" in state, f"working state must list recent commits:\n{state}"
+    assert "src/leaf.py" in state, f"working state must list uncommitted files:\n{state}"
+
+    dump = _dump_to_string(root)
+    assert "## Working state" in dump, "dump must include the working-state block"
+    assert "fixture commit" in dump, "dump must surface recent commits"
+
+
+def _test_dump_is_live(root: Path) -> None:
+    stale = "STALE_MARKER_SHOULD_NOT_APPEAR"
+    (root / ".agents" / "repo_map.md").write_text(f"# Repository Map\n\n{stale}\n")
+    (root / "src" / "new_module.py").write_text("def new_function():\n    pass\n")
+
+    dump = _dump_to_string(root)
+    assert "new_module.py" in dump, "dump should reflect files added after repo_map.md was cached"
+    assert stale not in dump, "dump should not echo stale cached repo_map.md content"
+
+
+def _test_misc(root: Path) -> None:
+    assert get_git_branch(Path(tempfile.gettempdir())) is None, \
+        "non-git directories must report no branch, never a fabricated 'main'"
+
+    # Decisions: every title survives; bodies are expanded newest-first.
+    adrs = "# Architecture Decisions\n\n" + "\n\n".join(
+        f"## ADR-{i:03d}: Decision number {i}\n- **Context**: {'x' * 400}" for i in range(1, 9))
+    clipped = clip_decisions(adrs, 1200)
+    for i in range(1, 9):
+        assert f"ADR-{i:03d}" in clipped, f"every ADR title must survive the trim (missing {i})"
+    assert "x" * 400 in clipped, "the newest ADR body should still be expanded"
+    assert clipped.count("x" * 400) < 8, "not every body can fit in a 1200-char budget"
+    assert "shown by title only" in clipped, "trimming must be announced"
+    assert clip_decisions(adrs, 10**6) == adrs, "an ample budget must pass the text through untouched"
+
+    # Memory: priority order, not file order — invariants outrank status.
+    mem = ("# Project Memory\n\n"
+           "## Active Epics & Tasks\n- " + "e" * 600 + "\n\n"
+           "## Core Invariants & Architecture Rules\n- " + "i" * 600 + "\n\n"
+           "## Domain Vocabulary & Gotchas\n- " + "g" * 600 + "\n")
+    trimmed = clip_memory(mem, 900)
+    assert "i" * 600 in trimmed, "invariants must be kept ahead of status sections"
+    assert "e" * 600 not in trimmed, "the epics/status section must be trimmed first"
+    assert "Active Epics" in trimmed, "a trimmed section must still be listed by heading"
+    assert "trimmed" in trimmed, "trimming must be announced"
+
+    # The top-priority section must survive even when it alone exceeds the budget —
+    # a greedy fill would drop it and backfill with smaller, less important sections.
+    fat = ("# Project Memory\n\n"
+           "## Active Epics & Tasks\n- " + "e" * 200 + "\n\n"
+           "## Core Invariants & Architecture Rules\n" +
+           "\n".join(f"- invariant {i} " + "i" * 60 for i in range(40)) + "\n")
+    squeezed = clip_memory(fat, 1500)
+    assert "invariant 0" in squeezed, "the highest-priority section must appear even if oversized"
+    assert "truncated to budget" in squeezed, "a partially included section must say so"
+    assert "e" * 200 not in squeezed, "lower-priority sections must not displace invariants"
+
+    assert resolve_budget(None, 24000) == 24000, "no flag means the command default"
+    assert resolve_budget("large", 24000) == BUDGET_PRESETS["large"], "preset names must resolve"
+    assert resolve_budget("5000", 24000) == 5000, "raw character counts must resolve"
+
+
 def run_self_test() -> int:
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmppath = Path(tmpdir)
-        (tmppath / "src").mkdir()
-        (tmppath / "src" / "main.py").write_text("class CoreApp:\n    def run(self):\n        pass\n\ndef helper():\n    pass\n")
-        (tmppath / "src" / "index.ts").write_text("export function startServer() {}\nexport class Handler {}\n")
-
-        root = tmppath
-        agents_dir = root / ".agents"
-        agents_dir.mkdir()
-        (agents_dir / "memory.md").write_text(DEFAULT_MEMORY_TEMPLATE)
-        (agents_dir / "decisions.md").write_text(DEFAULT_DECISIONS_TEMPLATE)
-        map_content = generate_repo_map(root)
-        (agents_dir / "repo_map.md").write_text(map_content)
-
-        assert (agents_dir / "memory.md").exists(), "memory.md should exist"
-        assert "class CoreApp" in map_content, "repo_map should contain CoreApp symbol"
-        assert "export function startServer" in map_content, "repo_map should contain startServer symbol"
-
-        act_file = agents_dir / "activity.jsonl"
-        entry = {
-            "timestamp": "2026-08-17T00:00:00Z",
-            "action": "test-action",
-            "summary": "self-test summary",
-            "files": ["src/main.py"],
-            "branch": "main",
-            "author": "test-suite"
-        }
-        act_file.write_text(json.dumps(entry) + "\n")
-        assert act_file.exists(), "activity.jsonl should exist"
-
-        # Regression: `dump` must regenerate the symbol map live, never echo a stale cached repo_map.md
-        stale_marker = "STALE_MARKER_SHOULD_NOT_APPEAR"
-        (agents_dir / "repo_map.md").write_text(f"# Repository Map\n\n{stale_marker}\n")
-        (tmppath / "src" / "new_module.py").write_text("def new_function():\n    pass\n")
-
-        old_cwd = os.getcwd()
-        try:
-            os.chdir(tmppath)
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                cmd_dump(argparse.Namespace())
-            dump_output = buf.getvalue()
-        finally:
-            os.chdir(old_cwd)
-
-        assert "new_module.py" in dump_output, "dump should reflect files added after repo_map.md was last cached"
-        assert stale_marker not in dump_output, "dump should not echo stale cached repo_map.md content"
-
-        print("Self-test passed successfully.")
-        return 0
+        root = Path(tmpdir).resolve()
+        _build_fixture(root)
+        _test_symbols_and_graph(root)
+        _test_budget_is_honest(root)
+        _test_misc(root)
+        _test_git_integration(root)
+        _test_dump_is_live(root)
+    print("Self-test passed successfully.")
+    return 0
 
 
 def main() -> int:
@@ -392,23 +1207,24 @@ def main() -> int:
     parser.add_argument("--test", action="store_true", help="Run self-tests and exit")
     subparsers = parser.add_subparsers(dest="command", help="Sub-command to execute")
 
-    # init
     subparsers.add_parser("init", help="Initialize .agents/ directory with templates and repo map")
 
-    # map
-    map_parser = subparsers.add_parser("map", help="Scan repository and generate symbol map")
+    map_parser = subparsers.add_parser("map", help="Scan repository and generate ranked symbol map")
     map_parser.add_argument("--stdout", action="store_true", help="Print map to stdout instead of file")
+    budget_help = (f"Character budget: a number, 'default', or {'/'.join(BUDGET_PRESETS)} "
+                   f"({', '.join(f'{k}={v}' for k, v in BUDGET_PRESETS.items())}). "
+                   f"Env: AGENT_CTX_BUDGET.")
+    map_parser.add_argument("--budget", default=None, help=budget_help)
 
-    # dump
-    subparsers.add_parser("dump", help="Print high-signal context snapshot (memory, decisions, map, activity)")
+    dump_parser = subparsers.add_parser(
+        "dump", help="Print high-signal context snapshot (state, memory, decisions, map, activity)")
+    dump_parser.add_argument("--budget", default=None, help=budget_help)
 
-    # log
     log_parser = subparsers.add_parser("log", help="Append an entry to .agents/activity.jsonl")
     log_parser.add_argument("--action", required=True, help="Short action name (e.g. 'feature-auth')")
     log_parser.add_argument("--summary", required=True, help="Detailed summary of change and rationale")
     log_parser.add_argument("--files", default="", help="Comma-separated list of modified files")
 
-    # history
     hist_parser = subparsers.add_parser("history", help="Show recent logged agent actions")
     hist_parser.add_argument("--limit", type=int, default=10, help="Number of records to show (default: 10)")
 
