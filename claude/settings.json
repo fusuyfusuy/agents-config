@@ -1,4 +1,8 @@
 {
+  "permissions": {
+    "defaultMode": "auto"
+  },
+  "enableWorkflows": true,
   "statusLine": {
     "type": "command",
     "command": "~/.claude/statusline-command.sh"
@@ -8,5 +12,8 @@
   },
   "effortLevel": "high",
   "tui": "fullscreen",
-  "theme": "dark"
+  "theme": "dark",
+  "inputNeededNotifEnabled": false,
+  "agentPushNotifEnabled": false,
+  "model": "opus"
 }
