@@ -2,6 +2,7 @@
 *.log
 *.tmp
 *.jsonl
+!.agents/activity.jsonl
 *.db
 quota-cache.json
 status-state.json

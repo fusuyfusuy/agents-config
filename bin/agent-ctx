@@ -255,6 +255,7 @@ def cmd_log(args: argparse.Namespace) -> int:
     with open(act_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
     print(f"Logged action '{args.action}' to {act_file.relative_to(root)}")
+    print("Reminder: if this introduced a new invariant, gotcha, or architecture decision, update .agents/memory.md or .agents/decisions.md.")
     return 0
 
 
@@ -310,11 +311,9 @@ def cmd_dump(args: argparse.Namespace) -> int:
         out.append(dec_file.read_text(encoding="utf-8", errors="ignore").strip())
         out.append("\n---\n")
 
-    map_file = agents_dir / "repo_map.md"
-    if map_file.is_file():
-        out.append("## Structure & Symbol Map\n")
-        out.append(map_file.read_text(encoding="utf-8", errors="ignore").strip())
-        out.append("\n---\n")
+    out.append("## Structure & Symbol Map (live)\n")
+    out.append(generate_repo_map(root).strip())
+    out.append("\n---\n")
 
     act_file = agents_dir / "activity.jsonl"
     if act_file.is_file():

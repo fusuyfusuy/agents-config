@@ -15,7 +15,9 @@ Before performing multi-file discovery or broad grepping, inspect the project's 
 agent-ctx dump
 ```
 
-To refresh or view only the AST repository symbol map:
+`dump` always regenerates the symbol map live (it never reads a cached file), so its output is guaranteed current — no separate refresh needed before trusting it.
+
+To write a fresh copy of the AST repository symbol map to `.agents/repo_map.md` (for humans/other tools browsing the repo directly), or view it without writing:
 
 ```bash
 agent-ctx map
