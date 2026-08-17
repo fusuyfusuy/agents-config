@@ -69,5 +69,6 @@ agent-ctx log \
 | `claude/skills/agent-context/SKILL.md` | `agent-ctx` project memory, mapping & activity tracking. |
 | `claude/skills/agent-processes/SKILL.md` | Condensed, triggerable form of this doc. |
 | `bin/agent-ctx` | Zero-daemon CLI for project memory and symbol mapping. |
+| `bin/agent-kb/` | Zero-daemon CLI + SQLite-backed error knowledge base (`agent-kb`). |
 | `status/status.py`, `status/statusline.sh` | Statusline: quota, branch, context usage. |
 

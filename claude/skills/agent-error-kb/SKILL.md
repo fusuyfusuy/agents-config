@@ -51,6 +51,5 @@ agent-kb seed               # pre-populate with 12 real-world AI agent error rec
 
 ## Notes
 
-- Binary: `~/.local/bin/agent-kb` (already on PATH). It's a thin wrapper around `~/projects/agent-error-kb/backend/cli.py` run through that project's own `.venv`.
-- Shared across tools: this same KB is also used by the Antigravity/Gemini CLI setup on this machine (`agents-config` repo) — fixes recorded here are visible there too, and vice versa.
-- An MCP server mode also exists (`agent-kb mcp`, stdio JSON-RPC) if you want it wired in as an MCP tool instead of shelling out — not configured by default here.
+- Binary: `~/.local/bin/agent-kb` (already on PATH). It's the console script from `bin/agent-kb/` in this repo (`agents-config`), installed into that project's own `.venv` by `setup.sh`.
+- Shared across tools: this same KB is also used by the Antigravity/Gemini CLI setup on this machine — fixes recorded here are visible there too, and vice versa.

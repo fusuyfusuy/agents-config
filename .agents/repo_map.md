@@ -1,24 +1,54 @@
 # Repository Map
 
-Total mapped files: 25
+Total mapped files: 38
 
-- `.agents/decisions.md` (217 B)
+- `.agents/decisions.md` (3618 B)
 - `.agents/memory.md` (288 B)
 - `.agents/repo_map.md` (1556 B)
-- `.gitignore` (349 B)
+- `.claude/RESUME.md` (694 B)
+- `.gitignore` (368 B)
 - `AGENTS.md` (4344 B)
-- `PROCESSES.md` (2179 B)
+- `PROCESSES.md` (2268 B)
+- `README.md` (4272 B)
 - `antigravity-cli/keybindings.json` (1169 B)
 - `antigravity-cli/settings.json` (1198 B)
 - `bin/agent-ctx` (14790 B)
-- `claude/settings.json` (237 B)
+- `bin/agent-kb/.python-version` (5 B)
+- `bin/agent-kb/README.md` (1374 B)
+- `bin/agent-kb/backend/cli.py` (5293 B)
+    * def _infer_error_type()
+    * def cli()
+    * def lookup()
+    * def record()
+    * def patterns()
+    * def seed()
+- `bin/agent-kb/backend/db.py` (18000 B)
+    * class ErrorDatabase (__init__, get_connection, _init_db, _auto_seed, add_record...)
+- `bin/agent-kb/backend/kb_engine.py` (6562 B)
+    * class KBEngine (normalize_error, compute_fingerprint, tokenize, calculate_token_similarity, format_markdown_context...)
+- `bin/agent-kb/backend/models.py` (4115 B)
+    * class Solution
+    * class ErrorRecord
+    * class RecordInput
+    * class SearchQuery
+    * class SearchResult
+    * class ErrorPattern
+- `bin/agent-kb/backend/seed_data.py` (14298 B)
+    * def seed_database()
+- `bin/agent-kb/pyproject.toml` (457 B)
+- `bin/agent-kb/tests/test_backend.py` (2473 B)
+    * class TestAgentErrorKB (setUp, test_01_lookup_error_solution, test_02_record_error_solution, test_03_list_patterns, test_04_cli_lookup...)
+- `bin/agent-kb/tests/verify_kb.py` (1713 B)
+    * def main()
+- `bin/agent-kb/uv.lock` (26536 B)
+- `claude/settings.json` (384 B)
 - `claude/skills/agent-context/SKILL.md` (2077 B)
-- `claude/skills/agent-error-kb/SKILL.md` (3116 B)
+- `claude/skills/agent-error-kb/SKILL.md` (2952 B)
 - `claude/skills/agent-processes/SKILL.md` (1145 B)
 - `claude/statusline-command.sh` (2625 B)
 - `config/config.json` (79 B)
 - `config/mcp_config.json` (144 B)
-- `setup.sh` (3436 B)
+- `setup.sh` (3924 B)
 - `status/agy-quota-cache.py` (3462 B)
     * def normalize_model_name()
     * def parse_usage()

@@ -65,6 +65,18 @@ link_file "$SCRIPT_DIR/claude/statusline-command.sh"     "$HOME/.claude/statusli
 # CLI Binaries
 link_file "$SCRIPT_DIR/bin/agent-ctx"                   "$HOME/.local/bin/agent-ctx"
 
+# agent-kb: build its venv, then symlink the installed console script
+AGENT_KB_DIR="$SCRIPT_DIR/bin/agent-kb"
+if [ -d "$AGENT_KB_DIR" ]; then
+    if command -v uv >/dev/null 2>&1; then
+        (cd "$AGENT_KB_DIR" && uv sync --quiet)
+    else
+        [ -d "$AGENT_KB_DIR/.venv" ] || python3 -m venv "$AGENT_KB_DIR/.venv"
+        "$AGENT_KB_DIR/.venv/bin/pip" install --quiet -e "$AGENT_KB_DIR"
+    fi
+    link_file "$AGENT_KB_DIR/.venv/bin/agent-kb"        "$HOME/.local/bin/agent-kb"
+fi
+
 # Tmux Plugins
 mkdir -p "$HOME/.tmux/plugins"
 if [ -d "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas" ]; then

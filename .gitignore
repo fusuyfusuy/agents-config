@@ -16,6 +16,8 @@ installation_id
 .DS_Store
 __pycache__/
 *.pyc
+.venv/
+*.egg-info/
 
 # Local backup files created during setup
 *.bak*
