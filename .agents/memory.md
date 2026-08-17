@@ -1,10 +1,24 @@
 # Project Memory
 
 ## Active Epics & Tasks
-- (Add active high-level tasks or milestones here)
+- `agent-ctx` is being grown into a **one-shot agent context saver/provider**: a single `dump` at session start should answer "what is this project, what's in flight, what did we decide, where do I start" with no follow-up grepping.
+- Open: the *saver* half is still one-sided — `log` writes `activity.jsonl`, but `memory.md`/`decisions.md` must be hand-edited. **Do not justify a `save` command with "stores without a CLI affordance don't get maintained": `~/projects/fusuycorp/titirek` disproves it** — 5.5 KB of memory.md and 7.2 KB of decisions.md, zero placeholders, all hand-written. This file sat empty because agents-config had little worth remembering, not because the interface was missing. The real argument for `save` is fewer calls at task end and enforcing which store gets what; measure the friction before building it.
+- **Validate every map change against `~/projects/fusuycorp/titirek`** (162 files, Next.js/TS/PocketBase), not just this repo. agents-config is 38 mostly-Python files and hid three ranking bugs that titirek exposed immediately.
 
 ## Core Invariants & Architecture Rules
-- (Add non-negotiable architecture decisions and constraints here)
+- **Stdlib only.** `bin/agent-ctx` must never take an external dependency; it is installed by symlink, not by a package manager. (`bin/agent-kb` is the opposite — it has its own venv/`uv.lock`.)
+- **Git is the authority on file visibility.** File listing goes through `git ls-files --cached --others --exclude-standard`. Never hand-parse `.gitignore` — the old parser got negations, path-scoped patterns, and trailing globs all wrong. The `os.walk` + `DEFAULT_IGNORES` path is a fallback for non-git dirs only.
+- **No silent caps.** Any truncation in the map or `dump` must state that it happened and how much was withheld. A quiet cap makes an agent believe it has seen the whole repo. This is the invariant behind both the character-budget design and the "Detailed N of M" footer.
+- **Never fabricate git metadata.** `get_git_branch` returns `None` outside git and `detached@<sha>` on detached HEAD. It previously returned `"main"` unconditionally on failure, writing false data into the permanent activity log.
+- **Ranking beats enumeration.** The map's job is orientation (what matters, what imports what, where to start), not listing — `Glob`/`Grep` already enumerate better. Anything added to the map must earn its bytes against that standard.
 
 ## Domain Vocabulary & Gotchas
-- (Add known edge-cases, quirks, or domain terms here)
+- **in-degree**: how many local modules import a file — the map's primary importance signal, shown as `← cli, db, ...`. **churn**: commits touching a file in the last 90 days. **tiers**: `core` (entry point or in-degree ≥ 2, full symbols) → `supporting` (compact one-liner) → collapsed by directory.
+- The import graph resolves **Python (via `ast`) and JS/TS (relative + `tsconfig`/`jsconfig` path aliases)**. Go/Rust/C deliberately have no edges — a guessy resolver injects false edges, and wrong ranking is worse than absent ranking. See the `ponytail:` note in `build_import_graph`.
+- **Path aliases are not optional.** In titirek, `@/…` imports outnumber relative ones **401 to 26** — resolving only relative specifiers captured ~6% of edges and left ranking churn-driven. Any new language added to the graph must handle its alias/module-resolution config, or the graph is decorative.
+- Framework conventions matter for entry points: `index.ts` is usually a **barrel re-export hub, not an entry point** (it was being mislabelled), while Next.js `app/**/page.tsx`, `layout.tsx`, `route.ts`, and `middleware.ts` **are** the entry points. `export default function` and `export const` must both be captured as symbols — missing them blanks out most React components.
+- `dump` spends a total character budget (`DUMP_TOTAL_BUDGET`) in priority order: **memory → decisions → map**. Hand-written stores win because they cannot be recovered from the code; the map is derivable and re-queryable with Grep, so it absorbs the remainder down to a floor. Every section that emits text must be counted, including the collapsed-dirs tail (`COLLAPSE_RESERVE`) — an unbudgeted tail silently blows the total.
+- Extensionless executables (e.g. `bin/agent-ctx` itself) are parsed by **shebang sniffing**; without it the tool could not map itself.
+- `.agents/activity.jsonl` is only visible because of the `!.agents/activity.jsonl` negation in `.gitignore` fighting the blanket `*.jsonl` rule. This is exactly the case the old ignore parser silently got wrong.
+- `dump` costs a full repo walk + AST parse on every call — ~0.12s and ~11.6k chars on this repo. Both scale with repo size; the character budget is the safety valve, wall-clock is not bounded.
+- `agent-ctx --test` is the whole test suite (no framework). It is mutation-checked: breaking the budget notice, the import graph, or branch detection each make it fail.
