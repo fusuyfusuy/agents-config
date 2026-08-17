@@ -4,7 +4,7 @@ Total mapped files: 25
 
 - `.agents/decisions.md` (217 B)
 - `.agents/memory.md` (288 B)
-- `.agents/repo_map.md` (1034 B)
+- `.agents/repo_map.md` (1556 B)
 - `.gitignore` (349 B)
 - `AGENTS.md` (4344 B)
 - `PROCESSES.md` (2179 B)
