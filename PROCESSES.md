@@ -40,11 +40,34 @@ agent-kb record \
 
 ---
 
+## Project Context & Memory (`agent-ctx`)
+
+Before exploratory code grepping across repos, load the project snapshot or symbol map:
+
+```bash
+agent-ctx dump       # Snapshot: memory, ADRs, repo map, recent activity
+agent-ctx map        # Refresh AST symbol map in .agents/repo_map.md
+```
+
+After completing non-trivial tasks or architectural changes, log activity and update memory:
+
+```bash
+agent-ctx log \
+  --action "<action_name>" \
+  --summary "<short_rationale_and_summary>" \
+  --files "<comma_separated_files>"
+```
+
+---
+
 ## Installed Skills & Config
 
 | File | Purpose |
 | :--- | :--- |
 | `AGENTS.md` | Core operating principles and subagent management protocol. |
 | `claude/skills/agent-error-kb/SKILL.md` | `agent-kb` lookup/record reference. |
+| `claude/skills/agent-context/SKILL.md` | `agent-ctx` project memory, mapping & activity tracking. |
 | `claude/skills/agent-processes/SKILL.md` | Condensed, triggerable form of this doc. |
+| `bin/agent-ctx` | Zero-daemon CLI for project memory and symbol mapping. |
 | `status/status.py`, `status/statusline.sh` | Statusline: quota, branch, context usage. |
+

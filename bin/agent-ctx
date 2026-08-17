@@ -1,0 +1,416 @@
+#!/usr/bin/env python3
+"""agent-ctx: Zero-daemon Agent Context, Memory, Repo Mapping & Activity Tracking CLI.
+
+Zero external dependencies - Python standard library only.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import datetime
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Dict, List, Optional, Set
+
+DEFAULT_IGNORES = {
+    ".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build",
+    "target", ".pytest_cache", ".mypy_cache", ".ruff_cache", "coverage",
+    ".idea", ".vscode", ".next", ".turbo", ".gemini", ".antigravity",
+}
+
+DEFAULT_MEMORY_TEMPLATE = """# Project Memory
+
+## Active Epics & Tasks
+- (Add active high-level tasks or milestones here)
+
+## Core Invariants & Architecture Rules
+- (Add non-negotiable architecture decisions and constraints here)
+
+## Domain Vocabulary & Gotchas
+- (Add known edge-cases, quirks, or domain terms here)
+"""
+
+DEFAULT_DECISIONS_TEMPLATE = """# Architecture Decisions (ADRs)
+
+## Record Format
+### [YYYY-MM-DD] ADR-Title
+- **Context**: Why was this decision necessary?
+- **Decision**: What was chosen?
+- **Consequences**: What trade-offs or constraints follow?
+"""
+
+
+def find_repo_root(start: Optional[Path] = None) -> Path:
+    curr = (start or Path.cwd()).resolve()
+    for parent in [curr] + list(curr.parents):
+        if (parent / ".git").exists() or (parent / ".agents").exists():
+            return parent
+    return curr
+
+
+def get_git_branch(root: Path) -> str:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return "main"
+
+
+def read_gitignore(root: Path) -> Set[str]:
+    patterns = set(DEFAULT_IGNORES)
+    gitignore = root / ".gitignore"
+    if gitignore.is_file():
+        try:
+            for line in gitignore.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    clean = line.rstrip("/").lstrip("/")
+                    if clean:
+                        patterns.add(clean)
+        except Exception:
+            pass
+    return patterns
+
+
+def should_ignore(rel_path: Path, ignores: Set[str]) -> bool:
+    parts = rel_path.parts
+    for part in parts:
+        if part in ignores:
+            return True
+        for ign in ignores:
+            if ign.startswith("*") and part.endswith(ign[1:]):
+                return True
+    return False
+
+
+def extract_python_symbols(content: str) -> List[str]:
+    symbols = []
+    try:
+        tree = ast.parse(content)
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                methods = [n.name for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+                m_str = f" ({', '.join(methods[:5])}{'...' if len(methods) > 5 else ''})" if methods else ""
+                symbols.append(f"class {node.name}{m_str}")
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                symbols.append(f"def {node.name}()")
+    except Exception:
+        # Fallback to regex if ast parsing fails
+        for line in content.splitlines():
+            m = re.match(r"^(?:class|def|async def)\s+([a-zA-Z0-9_]+)", line.strip())
+            if m:
+                symbols.append(m.group(0))
+    return symbols
+
+
+def extract_generic_symbols(content: str, ext: str) -> List[str]:
+    symbols = []
+    patterns = {
+        ".js": [r"^(?:export\s+)?(?:function|class|const|let)\s+([A-Za-z0-9_$]+)"],
+        ".jsx": [r"^(?:export\s+)?(?:function|class|const|let)\s+([A-Za-z0-9_$]+)"],
+        ".ts": [r"^(?:export\s+)?(?:function|class|interface|type|enum|const)\s+([A-Za-z0-9_$]+)"],
+        ".tsx": [r"^(?:export\s+)?(?:function|class|interface|type|enum|const)\s+([A-Za-z0-9_$]+)"],
+        ".go": [r"^func\s+(?:\([^\)]+\)\s+)?([A-Za-z0-9_]+)", r"^type\s+([A-Za-z0-9_]+)\s+(?:struct|interface)"],
+        ".rs": [r"^(?:pub\s+)?(?:fn|struct|enum|trait|type)\s+([A-Za-z0-9_]+)"],
+        ".c": [r"^[A-Za-z0-9_ *]+\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*\{"],
+        ".cpp": [r"^(?:class|struct)\s+([A-Za-z0-9_]+)", r"^[A-Za-z0-9_ *:]+\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*\{"],
+        ".h": [r"^(?:class|struct)\s+([A-Za-z0-9_]+)", r"^[A-Za-z0-9_ *:]+\s+([A-Za-z0-9_]+)\s*\([^)]*\);"],
+    }
+    regexes = patterns.get(ext, [])
+    if not regexes:
+        return []
+
+    compiled = [re.compile(p) for p in regexes]
+    for line in content.splitlines()[:500]:  # scan first 500 lines
+        line_clean = line.strip()
+        for c in compiled:
+            m = c.match(line_clean)
+            if m:
+                symbols.append(m.group(0)[:60])
+                break
+        if len(symbols) >= 15:
+            break
+    return symbols
+
+
+def generate_repo_map(root: Path, max_files: int = 150) -> str:
+    ignores = read_gitignore(root)
+    file_entries = []
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel_dir = Path(dirpath).relative_to(root)
+        if should_ignore(rel_dir, ignores):
+            dirnames.clear()
+            continue
+
+        dirnames[:] = [d for d in dirnames if not should_ignore(rel_dir / d, ignores)]
+
+        for f in sorted(filenames):
+            rel_file = rel_dir / f if rel_dir != Path(".") else Path(f)
+            if should_ignore(rel_file, ignores):
+                continue
+            full_path = Path(dirpath) / f
+            try:
+                size = full_path.stat().st_size
+                if size > 500_000:  # skip files > 500KB
+                    continue
+                ext = rel_file.suffix.lower()
+                symbols = []
+                if ext == ".py":
+                    symbols = extract_python_symbols(full_path.read_text(encoding="utf-8", errors="ignore"))
+                elif ext in {".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".c", ".cpp", ".h"}:
+                    symbols = extract_generic_symbols(full_path.read_text(encoding="utf-8", errors="ignore"), ext)
+
+                file_entries.append((str(rel_file), size, symbols))
+            except Exception:
+                continue
+
+    file_entries.sort(key=lambda x: x[0])
+    lines = ["# Repository Map", "", f"Total mapped files: {len(file_entries)}", ""]
+    for path, size, symbols in file_entries[:max_files]:
+        lines.append(f"- `{path}` ({size} B)")
+        for s in symbols[:6]:
+            lines.append(f"    * {s}")
+    return "\n".join(lines)
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    root = find_repo_root()
+    agents_dir = root / ".agents"
+    agents_dir.mkdir(exist_ok=True)
+
+    mem_file = agents_dir / "memory.md"
+    dec_file = agents_dir / "decisions.md"
+    act_file = agents_dir / "activity.jsonl"
+    map_file = agents_dir / "repo_map.md"
+
+    if not mem_file.exists():
+        mem_file.write_text(DEFAULT_MEMORY_TEMPLATE, encoding="utf-8")
+        print(f"Created {mem_file.relative_to(root)}")
+    else:
+        print(f"Already exists: {mem_file.relative_to(root)}")
+
+    if not dec_file.exists():
+        dec_file.write_text(DEFAULT_DECISIONS_TEMPLATE, encoding="utf-8")
+        print(f"Created {dec_file.relative_to(root)}")
+    else:
+        print(f"Already exists: {dec_file.relative_to(root)}")
+
+    if not act_file.exists():
+        act_file.touch()
+        print(f"Created {act_file.relative_to(root)}")
+
+    repo_map = generate_repo_map(root)
+    map_file.write_text(repo_map, encoding="utf-8")
+    print(f"Generated {map_file.relative_to(root)}")
+    print("Initialization complete.")
+    return 0
+
+
+def cmd_map(args: argparse.Namespace) -> int:
+    root = find_repo_root()
+    agents_dir = root / ".agents"
+    agents_dir.mkdir(exist_ok=True)
+    map_content = generate_repo_map(root)
+
+    if args.stdout:
+        print(map_content)
+    else:
+        map_file = agents_dir / "repo_map.md"
+        map_file.write_text(map_content, encoding="utf-8")
+        print(f"Updated {map_file.relative_to(root)}")
+    return 0
+
+
+def cmd_log(args: argparse.Namespace) -> int:
+    root = find_repo_root()
+    agents_dir = root / ".agents"
+    agents_dir.mkdir(exist_ok=True)
+    act_file = agents_dir / "activity.jsonl"
+
+    files_list = [f.strip() for f in args.files.split(",") if f.strip()] if args.files else []
+    record = {
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "action": args.action,
+        "summary": args.summary,
+        "files": files_list,
+        "branch": get_git_branch(root),
+        "author": os.environ.get("AGENT_NAME", os.environ.get("USER", "agent")),
+    }
+
+    with open(act_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
+    print(f"Logged action '{args.action}' to {act_file.relative_to(root)}")
+    return 0
+
+
+def cmd_history(args: argparse.Namespace) -> int:
+    root = find_repo_root()
+    act_file = root / ".agents" / "activity.jsonl"
+    if not act_file.is_file():
+        print("No activity recorded yet.")
+        return 0
+
+    lines = act_file.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
+    if not lines:
+        print("No activity recorded yet.")
+        return 0
+
+    records = []
+    for l in lines:
+        try:
+            records.append(json.loads(l))
+        except Exception:
+            continue
+
+    selected = records[-args.limit:] if args.limit > 0 else records
+    for r in reversed(selected):
+        ts = r.get("timestamp", "")[:19].replace("T", " ")
+        action = r.get("action", "")
+        summary = r.get("summary", "")
+        files = ", ".join(r.get("files", []))
+        branch = r.get("branch", "")
+        print(f"[{ts}] ({branch}) {action}")
+        print(f"  Summary: {summary}")
+        if files:
+            print(f"  Files: {files}")
+        print()
+    return 0
+
+
+def cmd_dump(args: argparse.Namespace) -> int:
+    root = find_repo_root()
+    agents_dir = root / ".agents"
+
+    out = [f"# Agent Context Snapshot ({root.name})\n"]
+
+    mem_file = agents_dir / "memory.md"
+    if mem_file.is_file():
+        out.append("## Project Memory\n")
+        out.append(mem_file.read_text(encoding="utf-8", errors="ignore").strip())
+        out.append("\n---\n")
+
+    dec_file = agents_dir / "decisions.md"
+    if dec_file.is_file():
+        out.append("## Architecture Decisions\n")
+        out.append(dec_file.read_text(encoding="utf-8", errors="ignore").strip())
+        out.append("\n---\n")
+
+    map_file = agents_dir / "repo_map.md"
+    if map_file.is_file():
+        out.append("## Structure & Symbol Map\n")
+        out.append(map_file.read_text(encoding="utf-8", errors="ignore").strip())
+        out.append("\n---\n")
+
+    act_file = agents_dir / "activity.jsonl"
+    if act_file.is_file():
+        lines = act_file.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
+        if lines:
+            out.append("## Recent Activity\n")
+            for l in lines[-5:]:
+                try:
+                    r = json.loads(l)
+                    ts = r.get("timestamp", "")[:10]
+                    out.append(f"- **{ts} [{r.get('action')}]**: {r.get('summary')} (files: {', '.join(r.get('files', [])) or 'none'})")
+                except Exception:
+                    pass
+
+    print("\n".join(out))
+    return 0
+
+
+def run_self_test() -> int:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmppath = Path(tmpdir)
+        (tmppath / "src").mkdir()
+        (tmppath / "src" / "main.py").write_text("class CoreApp:\n    def run(self):\n        pass\n\ndef helper():\n    pass\n")
+        (tmppath / "src" / "index.ts").write_text("export function startServer() {}\nexport class Handler {}\n")
+
+        root = tmppath
+        agents_dir = root / ".agents"
+        agents_dir.mkdir()
+        (agents_dir / "memory.md").write_text(DEFAULT_MEMORY_TEMPLATE)
+        (agents_dir / "decisions.md").write_text(DEFAULT_DECISIONS_TEMPLATE)
+        map_content = generate_repo_map(root)
+        (agents_dir / "repo_map.md").write_text(map_content)
+
+        assert (agents_dir / "memory.md").exists(), "memory.md should exist"
+        assert "class CoreApp" in map_content, "repo_map should contain CoreApp symbol"
+        assert "export function startServer" in map_content, "repo_map should contain startServer symbol"
+
+        act_file = agents_dir / "activity.jsonl"
+        entry = {
+            "timestamp": "2026-08-17T00:00:00Z",
+            "action": "test-action",
+            "summary": "self-test summary",
+            "files": ["src/main.py"],
+            "branch": "main",
+            "author": "test-suite"
+        }
+        act_file.write_text(json.dumps(entry) + "\n")
+        assert act_file.exists(), "activity.jsonl should exist"
+
+        print("Self-test passed successfully.")
+        return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Zero-daemon Agent Context, Memory, & Activity Tracker")
+    parser.add_argument("--test", action="store_true", help="Run self-tests and exit")
+    subparsers = parser.add_subparsers(dest="command", help="Sub-command to execute")
+
+    # init
+    subparsers.add_parser("init", help="Initialize .agents/ directory with templates and repo map")
+
+    # map
+    map_parser = subparsers.add_parser("map", help="Scan repository and generate symbol map")
+    map_parser.add_argument("--stdout", action="store_true", help="Print map to stdout instead of file")
+
+    # dump
+    subparsers.add_parser("dump", help="Print high-signal context snapshot (memory, decisions, map, activity)")
+
+    # log
+    log_parser = subparsers.add_parser("log", help="Append an entry to .agents/activity.jsonl")
+    log_parser.add_argument("--action", required=True, help="Short action name (e.g. 'feature-auth')")
+    log_parser.add_argument("--summary", required=True, help="Detailed summary of change and rationale")
+    log_parser.add_argument("--files", default="", help="Comma-separated list of modified files")
+
+    # history
+    hist_parser = subparsers.add_parser("history", help="Show recent logged agent actions")
+    hist_parser.add_argument("--limit", type=int, default=10, help="Number of records to show (default: 10)")
+
+    args = parser.parse_args()
+
+    if args.test:
+        return run_self_test()
+
+    if not args.command:
+        parser.print_help()
+        return 1
+
+    handlers = {
+        "init": cmd_init,
+        "map": cmd_map,
+        "dump": cmd_dump,
+        "log": cmd_log,
+        "history": cmd_history,
+    }
+    return handlers[args.command](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

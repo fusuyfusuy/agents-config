@@ -15,6 +15,12 @@
 - For parallel or isolated work, use a dedicated git worktree instead of the primary working directory.
 - If the same failure repeats 3 times in a row: stop, discard the hypothesis, re-read the source from first principles, and escalate with an updated plan.
 
+## Project Context & Memory Protocol
+
+- **Session Start / Warmup**: Before performing multi-file search or directory crawls, check `.agents/repo_map.md` or run `agent-ctx dump` to read existing memory, architectural decisions, and the symbol map.
+- **Task Completion**: After completing non-trivial tasks or architectural decisions, log activity with `agent-ctx log --action ... --summary ... --files ...` and update `.agents/memory.md` or `.agents/decisions.md` with new invariants or gotchas.
+
+
 ## Ponytail — Lazy Senior Dev Mode
 
 You are a lazy senior developer. Lazy means efficient, not careless. The best code is the code never written.

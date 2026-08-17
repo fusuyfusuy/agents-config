@@ -31,6 +31,22 @@ if [ -n "$week_pct" ]; then
   fi
 fi
 
+# Save rate-limit snapshot to cache for tmux / tools
+if [ -n "$five_pct" ] || [ -n "$week_pct" ]; then
+  mkdir -p "$HOME/.cache/agent-quotas"
+  cat <<EOF > "$HOME/.cache/agent-quotas/claude.json.tmp"
+{
+  "timestamp": $(date +%s),
+  "model": "$model",
+  "five_hour_used_pct": ${five_pct:-null},
+  "five_hour_resets_at": ${five_reset:-null},
+  "seven_day_used_pct": ${week_pct:-null},
+  "seven_day_resets_at": ${week_reset:-null}
+}
+EOF
+  mv -f "$HOME/.cache/agent-quotas/claude.json.tmp" "$HOME/.cache/agent-quotas/claude.json" 2>/dev/null || true
+fi
+
 # Git info, computed from cwd (not provided by the statusline JSON).
 git_part=""
 if git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then

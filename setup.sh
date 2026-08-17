@@ -10,13 +10,19 @@ mkdir -p "$HOME/.gemini/antigravity-cli"
 mkdir -p "$HOME/.gemini/config/skills"
 mkdir -p "$HOME/.antigravity"
 mkdir -p "$HOME/.claude/skills"
+mkdir -p "$HOME/.local/bin"
 
 # Set executable permissions on scripts
 chmod +x "$SCRIPT_DIR/setup.sh" \
+         "$SCRIPT_DIR/bin/agent-ctx" \
          "$SCRIPT_DIR/status/status.py" \
          "$SCRIPT_DIR/status/statusline.sh" \
          "$SCRIPT_DIR/status/agy-quota-cache.py" \
-         "$SCRIPT_DIR/claude/statusline-command.sh"
+         "$SCRIPT_DIR/claude/statusline-command.sh" \
+         "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux" \
+         "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/render_status.sh" \
+         "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/fetch_quotas.py" \
+         "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/helpers.sh"
 
 link_file() {
     local src="$1"
@@ -55,6 +61,16 @@ link_file "$SCRIPT_DIR/status/agy-quota-cache.py"        "$HOME/.antigravity/agy
 # Claude Code
 link_file "$SCRIPT_DIR/claude/settings.json"             "$HOME/.claude/settings.json"
 link_file "$SCRIPT_DIR/claude/statusline-command.sh"     "$HOME/.claude/statusline-command.sh"
+
+# CLI Binaries
+link_file "$SCRIPT_DIR/bin/agent-ctx"                   "$HOME/.local/bin/agent-ctx"
+
+# Tmux Plugins
+mkdir -p "$HOME/.tmux/plugins"
+if [ -d "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas" ]; then
+    ln -sfn "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas" "$HOME/.tmux/plugins/tmux-agent-quotas"
+    echo "  [LINK] Linked tmux plugin: $HOME/.tmux/plugins/tmux-agent-quotas"
+fi
 
 # Skills (Claude & Gemini / Antigravity Global)
 if [ -d "$SCRIPT_DIR/claude/skills" ]; then
