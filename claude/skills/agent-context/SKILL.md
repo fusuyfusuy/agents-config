@@ -59,6 +59,8 @@ AGENT_CTX_FOCUS="auth,api" agent-ctx dump
 
 Use it on large repos when you already know the area of a task — it is the cheap, task-conditioned substitute for a global dump. Budget rules still apply; truncation is still announced.
 
+**New agents (fresh sessions, subagents) get focus automatically** when `AGENT_CTX_FOCUS` is exported in the shell they launch from: the standard warmup `agent-ctx dump` then produces a focused map without any extra flag. For a one-off child, pass `--focus` explicitly in the subagent's task text instead.
+
 ## 2. Initialize a Project
 
 To set up the `.agents/` directory structure (`memory.md`, `decisions.md`, `repo_map.md`, `activity.jsonl`) in a new or existing repository:
