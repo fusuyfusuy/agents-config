@@ -1,10 +1,18 @@
 # Architecture Decisions (ADRs)
 
-## Record Format
+<!--
+Record format - one heading per decision, newest appended last:
+
 ### [YYYY-MM-DD] ADR-Title
 - **Context**: Why was this decision necessary?
 - **Decision**: What was chosen?
 - **Consequences**: What trade-offs or constraints follow?
+- **Superseded by**: optional. Name the ADR that replaced this one. Superseded
+  entries stay here for history but are listed by title only in `agent-ctx dump`.
+
+Kept as an HTML comment on purpose: a real heading here parses as an ADR and
+renders as a phantom entry in every dump.
+-->
 
 ### [2026-08-17] agent-ctx dump regenerates the symbol map live, never from cache
 - **Context**: `dump` read the cached `.agents/repo_map.md` from disk. That file only updates when someone remembers to run `agent-ctx map`, so it silently drifted out of sync with the repo (missing an entire directory added in the very commit that last refreshed it) with no timestamp or signal telling an agent the data was stale. The `agent-context` skill tells agents to trust `dump`'s output over grepping, so stale data there is actively worse than no tool.
@@ -30,3 +38,8 @@
 - **Context**: Measured the budget/return curve on titirek and a 12k-file synthetic repo. Raising the budget costs **tokens, not time** — map generation is flat (~1.2s) at every budget — and it saturates: titirek's map stops growing at 27.6k chars, after which extra budget buys literally nothing. But saturation is O(repo size): uncapped, the 12k-file repo renders **4.3MB (~1.09M tokens)**, several times a full context window. So a single fixed "immense" number is meaningless — it is free on one repo and catastrophic on another. Separately, both prose trims were ordered backwards. `decisions.md` was tail-clipped (keep newest), but ADRs are not news — titirek's ADR-001 (app shell) and ADR-003 (zero client-side PocketBase / IDOR defense) are foundational, and it was on track to exceed its cap within a day at ~1.6 ADRs/day over its 5-day life. `memory.md` was head-clipped, which keeps "Active Epics" (the disposable changelog) and drops "Domain Vocabulary & Gotchas" (durable). A greedy priority fill was also wrong: it dropped Core Invariants whenever that section was the largest and backfilled with smaller, less important ones.
 - **Decision**: `--budget <chars|default|large|immense>` (plus `AGENT_CTX_BUDGET`) on both `map` and `dump`; `large`=60k, `immense`=200k, deliberately no "unlimited". `dump` splits its total as one third memory, one third decisions, remainder to the map, so a bigger preset helps every section. Trimming is now structural: `decisions.md` keeps **every ADR title** and expands bodies newest-first (titles cost ~60 chars, so the full decision list stays visible indefinitely); `memory.md` trims by section priority (invariants → gotchas → status) and **truncates** an oversized top-priority section rather than dropping it. Heading level is detected, not assumed — titirek writes `## ADR-001:` while the template writes `### [date]`.
 - **Consequences**: Nothing is ever silently invisible: an agent always sees the complete list of decisions and every section heading. On titirek `default` is 23.0k chars and `large`/`immense` are byte-identical at 46.0k (saturated), which is the empirical case for staying on `default` unless exploring an unfamiliar large repo. `clip_lines` is deleted. The dominant remaining growth risk is that `decisions.md` is append-only with no pruning story — budgets bound what is *shown*, not what accumulates.
+
+### [2026-08-18] `map` is complete by default; only `dump` is budgeted
+- **Context**: The budget was applied uniformly, so `agent-ctx map` truncated too. But `map` writes `.agents/repo_map.md` or stdout for humans and other tools to browse — it costs disk, not context — and a deliberately incomplete file on disk is just a worse file. Measured the real cost of an uncapped map across four real repos (28–173 files): the rate is a stable **~140–175 chars/file, i.e. ~40 tokens/file**, and three of the four were already complete at the old default. Only titirek exceeded it, going from 10.9k to 30.4k chars (2.7k → 7.6k tokens). The earlier 1.09M-token figure came from a synthetic fixture with denser imports and repeated symbols than real code, and overstated the cost.
+- **Decision**: `map` defaults to `UNLIMITED`; `--budget <chars|large|immense|unlimited>` still caps it explicitly. `dump` keeps `DUMP_TOTAL_BUDGET`, since that output is spent directly on context, and gained `unlimited` as an accepted preset. Separately, ADRs marked `**Superseded by**: ...` are now kept in the file for history but never expanded in `dump` — the pruning story the budget work did not provide. `_split_sections` became HTML-comment aware, and both decisions templates moved their record-format example inside a comment, so the example heading stops parsing as a phantom ADR in every dump.
+- **Consequences**: The on-disk map is now the complete picture (titirek 30.9k chars), while `dump` stays at 23.3k. Growth in `decisions.md` no longer implies growth in the snapshot: supersession bounds what is shown without deleting history. Files with no parsed symbols are still grouped into "Other files" even at an unlimited budget — they are summarized, not dropped, since listing every `.svg` individually is noise at any budget.

@@ -41,7 +41,11 @@ ENTRY_NAMES = {
 # Next.js / Remix style file-system routing: these *are* the app's entry points.
 ROUTE_STEMS = {"page", "layout", "route"}
 
-MAP_BUDGET_DEFAULT = 12000
+# `map` writes a file / stdout for browsing, not context, so it is complete by
+# default. Real repos cost ~40 tokens per file, so a full map is affordable up to
+# a few hundred files; `--budget` caps it when that stops being true.
+UNLIMITED = 10**9
+MAP_BUDGET_DEFAULT = UNLIMITED
 # `dump` spends its budget in priority order: memory and decisions are hand-written
 # and cannot be recovered from the code, so they are served first; the map is
 # derivable and re-queryable with Grep, so it absorbs whatever is left.
@@ -50,9 +54,10 @@ DUMP_MAP_MIN_BUDGET = 4000
 # Presets are absolute character budgets (~4 chars per token). Raising the budget
 # costs tokens, not time — generation is flat regardless — and buys progressively
 # less: the map saturates at a size set by the repo, after which more budget adds
-# nothing. There is deliberately no "unlimited": on a 12k-file repo an uncapped map
-# renders ~4.3MB (~1.09M tokens), several times a full context window.
-BUDGET_PRESETS = {"large": 60_000, "immense": 200_000}
+# nothing. Measured on real repos the full map runs ~40 tokens/file, so "unlimited"
+# is cheap into the hundreds of files and untenable in the thousands. `dump` still
+# defaults to DUMP_TOTAL_BUDGET because it spends context, not disk.
+BUDGET_PRESETS = {"large": 60_000, "immense": 200_000, "unlimited": UNLIMITED}
 COLLAPSE_RESERVE = 1200  # room for the collapsed-dirs tail, so it stays inside the budget
 MAX_PARSE_BYTES = 500_000
 CHURN_DAYS = 90
@@ -71,11 +76,21 @@ DEFAULT_MEMORY_TEMPLATE = """# Project Memory
 
 DEFAULT_DECISIONS_TEMPLATE = """# Architecture Decisions (ADRs)
 
-## Record Format
-### [YYYY-MM-DD] ADR-Title
+<!--
+Record format - one `## ` heading per decision, newest appended last:
+
+## [YYYY-MM-DD] ADR-Title
 - **Context**: Why was this decision necessary?
 - **Decision**: What was chosen?
 - **Consequences**: What trade-offs or constraints follow?
+- **Superseded by**: optional. Name the ADR that replaced this one. Superseded
+  entries stay in the file for history but are never expanded in `agent-ctx
+  dump` - they are listed by title only, so the file can grow without the
+  snapshot growing with it.
+
+This block is an HTML comment on purpose: a `## ` heading here would be parsed
+as an ADR and render as a phantom entry in every dump.
+-->
 """
 
 
@@ -723,7 +738,18 @@ def _split_sections(text: str) -> Tuple[str, List[Tuple[str, str]]]:
     (titirek writes `## ADR-001: ...`, this repo writes `### [date] Title`).
     """
     lines = text.splitlines()
-    counts = {lv: sum(1 for l in lines if re.match(rf"^#{{{lv}}}\s+\S", l)) for lv in (2, 3, 4)}
+    # A heading inside an HTML comment is documentation, not a record: the shipped
+    # templates show the record format that way, and it must not parse as an entry.
+    visible, in_comment = [], False
+    for line in lines:
+        visible.append(not in_comment)
+        if "<!--" in line and "-->" not in line:
+            in_comment = True
+        elif in_comment and "-->" in line:
+            in_comment = False
+
+    counts = {lv: sum(1 for i, l in enumerate(lines)
+                      if visible[i] and re.match(rf"^#{{{lv}}}\s+\S", l)) for lv in (2, 3, 4)}
     level = max(counts, key=lambda lv: (counts[lv], -lv))
     if counts[level] == 0:
         return text, []
@@ -731,14 +757,20 @@ def _split_sections(text: str) -> Tuple[str, List[Tuple[str, str]]]:
     pat = re.compile(rf"^#{{{level}}}\s+\S")
     preamble: List[str] = []
     sections: List[List] = []
-    for line in lines:
-        if pat.match(line):
+    for i, line in enumerate(lines):
+        if visible[i] and pat.match(line):
             sections.append([line, []])
         elif sections:
             sections[-1][1].append(line)
         else:
             preamble.append(line)
     return "\n".join(preamble).strip(), [(h, "\n".join(b).rstrip()) for h, b in sections]
+
+
+def _is_superseded(section: Tuple[str, str]) -> bool:
+    """An ADR that names its replacement is history, not current guidance."""
+    heading, body = section
+    return "superseded by" in body.lower() or "[superseded]" in heading.lower()
 
 
 def clip_decisions(text: str, limit: int) -> str:
@@ -750,12 +782,16 @@ def clip_decisions(text: str, limit: int) -> str:
     the file.
     """
     preamble, sections = _split_sections(text)
-    if not sections or len(text) <= limit:
+    if not sections:
+        return text
+
+    live = [i for i in range(len(sections)) if not _is_superseded(sections[i])]
+    if len(live) == len(sections) and len(text) <= limit:
         return text
 
     used = len(preamble) + sum(len(h) + 2 for h, _ in sections) + 160
     expanded = set()
-    for idx in range(len(sections) - 1, -1, -1):  # newest entries are appended last
+    for idx in reversed(live):  # newest live entries are appended last
         body = sections[idx][1]
         if used + len(body) + 2 > limit:
             continue
@@ -764,12 +800,19 @@ def clip_decisions(text: str, limit: int) -> str:
 
     out = [preamble] if preamble else []
     for idx, (heading, body) in enumerate(sections):
-        out.append(f"{heading}\n{body}".rstrip() if idx in expanded
-                   else f"{heading}\n- _(body trimmed to budget — read `.agents/decisions.md`)_")
+        if idx in expanded:
+            out.append(f"{heading}\n{body}".rstrip())
+        elif idx not in live:
+            out.append(f"{heading}\n- _(superseded — kept for history, read `.agents/decisions.md`)_")
+        else:
+            out.append(f"{heading}\n- _(body trimmed to budget — read `.agents/decisions.md`)_")
     hidden = len(sections) - len(expanded)
     if hidden:
-        out.append(f"_{hidden} of {len(sections)} decisions shown by title only; "
-                   f"no decision is hidden entirely._")
+        superseded = len(sections) - len(live)
+        note = f"_{hidden} of {len(sections)} decisions shown by title only"
+        if superseded:
+            note += f" ({superseded} superseded)"
+        out.append(note + "; no decision is hidden entirely._")
     return "\n\n".join(out)
 
 
@@ -1184,7 +1227,23 @@ def _test_misc(root: Path) -> None:
     assert "truncated to budget" in squeezed, "a partially included section must say so"
     assert "e" * 200 not in squeezed, "lower-priority sections must not displace invariants"
 
+    # Superseded ADRs are never expanded, even when the budget is ample.
+    sup = ("# Architecture Decisions\n\n"
+           "## ADR-001: Old way\n- **Context**: " + "o" * 300 + "\n- **Superseded by**: ADR-002\n\n"
+           "## ADR-002: New way\n- **Context**: " + "n" * 300 + "\n")
+    got = clip_decisions(sup, 10**6)
+    assert "ADR-001" in got and "ADR-002" in got, "both titles must remain visible"
+    assert "n" * 300 in got, "the live ADR body must be expanded"
+    assert "o" * 300 not in got, "a superseded ADR body must never be expanded"
+    assert "superseded" in got, "supersession must be announced"
+
+    # The shipped decisions template must not itself parse as an ADR.
+    _, tpl_sections = _split_sections(DEFAULT_DECISIONS_TEMPLATE)
+    assert not tpl_sections, "the decisions template must contain no phantom ADR heading"
+
     assert resolve_budget(None, 24000) == 24000, "no flag means the command default"
+    assert resolve_budget(None, MAP_BUDGET_DEFAULT) == UNLIMITED, "map defaults to a complete map"
+    assert resolve_budget("unlimited", 24000) == UNLIMITED, "'unlimited' must resolve"
     assert resolve_budget("large", 24000) == BUDGET_PRESETS["large"], "preset names must resolve"
     assert resolve_budget("5000", 24000) == 5000, "raw character counts must resolve"
 

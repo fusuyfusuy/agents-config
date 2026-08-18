@@ -35,15 +35,17 @@ agent-ctx map --stdout
 
 ### Budget
 
-`dump` and `map` both accept `--budget <chars|default|large|immense>` (or the `AGENT_CTX_BUDGET` env var). `large` is 60 000 chars, `immense` is 200 000.
+**`agent-ctx map` is complete by default** — it writes `.agents/repo_map.md` or stdout for browsing, which costs disk, not context. Measured on real repos a full map runs **~40 tokens per file**, so it stays cheap into the hundreds of files. Pass `--budget <chars|large|immense>` to cap it on a very large repo.
 
-A bigger budget costs **tokens, not time** — generation is flat regardless — and it saturates: past the point where every ranked file is already detailed, extra budget buys nothing. On a small-to-mid repo `large` and `immense` are often byte-identical to each other. Reach for a bigger budget when you need broad coverage of an unfamiliar large repo; stay on `default` for routine work, since an oversized dump crowds the context it is meant to save.
+**`agent-ctx dump` stays budgeted** (24 000 chars by default), because that output is spent directly on context. Override per call with `--budget <chars|default|large|immense|unlimited>` or the `AGENT_CTX_BUDGET` env var.
 
-When the budget binds, degradation is by priority and nothing vanishes silently:
+Raising a budget costs **tokens, not time** — generation is flat regardless — and it saturates: past the point where every ranked file is already detailed, extra budget buys nothing. Reach for a bigger `dump` budget when orienting in an unfamiliar large repo; stay on `default` for routine work, since an oversized dump crowds the context it is meant to save.
+
+When a budget binds, degradation is by priority and nothing vanishes silently:
 
 - **Memory** keeps invariants and gotchas ahead of status/epics; an oversized top-priority section is truncated rather than dropped.
-- **Decisions** always list **every ADR title**, expanding bodies newest-first — so you always know which decisions exist and can read any body from the file.
-- **Map** collapses lower-ranked files by directory and reports the counts.
+- **Decisions** always list **every ADR title**, expanding bodies newest-first. An ADR marked `**Superseded by**: ...` is kept for history but never expanded, so the file can grow without the snapshot growing with it.
+- **Map** collapses lower-ranked files by directory and reports the counts. Files with no parsed symbols are always summarized this way rather than listed individually, even at an unlimited budget — they are grouped, not dropped.
 
 ## 2. Initialize a Project
 

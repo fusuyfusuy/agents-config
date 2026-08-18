@@ -1,6 +1,6 @@
 # Repository Map
 
-38 files · 3634 lines of parsed code · ranked by import in-degree + 90d churn + entry points
+38 files · 3693 lines of parsed code · ranked by import in-degree + 90d churn + entry points
 
 ## Entry points
 
@@ -58,21 +58,21 @@
   :111  patterns(limit: int)
   :124  seed()
 
-`bin/agent-ctx` · 1252 ln · 3 commits/90d · entry point
+`bin/agent-ctx` · 1311 ln · 4 commits/90d · entry point
   "agent-ctx: Zero-daemon Agent Context, Memory, Repo Mapping & Activity Tracking CLI."
-  :86   find_repo_root(start: Optional[Path]=None) -> Path
-  :94   run_git(root: Path, *args: str, timeout: int=5) -> Optional[str]
-  :108  get_git_branch(root: Path) -> Optional[str]
-  :124  should_ignore(rel_path: Path) -> bool
-  :128  list_files(root: Path) -> List[str]
-  :151  get_churn(root: Path, days: int=CHURN_DAYS) -> Dict[str, int]
-  :165  get_working_state(root: Path) -> Optional[str]
-  :196  class FileInfo
-  :199    __init__(path: str, size: int)
-  :212    in_degree() -> int
-  :216    score() -> int
-  :220  _elide(text: str, limit: int) -> str
-  ... +43 more symbols
+  :101  find_repo_root(start: Optional[Path]=None) -> Path
+  :109  run_git(root: Path, *args: str, timeout: int=5) -> Optional[str]
+  :123  get_git_branch(root: Path) -> Optional[str]
+  :139  should_ignore(rel_path: Path) -> bool
+  :143  list_files(root: Path) -> List[str]
+  :166  get_churn(root: Path, days: int=CHURN_DAYS) -> Dict[str, int]
+  :180  get_working_state(root: Path) -> Optional[str]
+  :211  class FileInfo
+  :214    __init__(path: str, size: int)
+  :227    in_degree() -> int
+  :231    score() -> int
+  :235  _elide(text: str, limit: int) -> str
+  ... +44 more symbols
 
 `bin/agent-kb/backend/kb_engine.py` · 168 ln · ← cli, db · 1 commit/90d
   :8    class KBEngine
