@@ -219,6 +219,7 @@ class FileInfo:
         self.symbols: List[Tuple[int, int, str]] = []  # (lineno, depth, text)
         self.imports: List[tuple] = []
         self.importers: Set[str] = set()
+        self.depends_on: Set[str] = set()
         self.churn = 0
         self.entry = False
         self.executable = False
@@ -520,6 +521,7 @@ def build_import_graph(infos: Dict[str, FileInfo], py_index: Dict[str, Set[str]]
 
             if target and target != source:
                 infos[target].importers.add(source)
+                info.depends_on.add(target)
 
 
 # --------------------------------------------------------------------------
@@ -663,21 +665,44 @@ def _collapse_dirs(infos: List[FileInfo], limit: int) -> List[str]:
     return _group_dirs(infos, top_level_only=True)
 
 
-def generate_repo_map(root: Path, budget: int = MAP_BUDGET_DEFAULT) -> str:
+def generate_repo_map(root: Path, budget: int = MAP_BUDGET_DEFAULT,
+                      focus: Optional[List[str]] = None) -> str:
     infos = collect_repo(root)
     total = len(infos)
     total_lines = sum(i.lines for i in infos.values())
 
     ranked = sorted(infos.values(), key=lambda i: (-i.score, i.path))
-    head = [
-        "# Repository Map",
-        "",
-        f"{total} files · {total_lines} lines of parsed code · "
-        f"ranked by import in-degree + {CHURN_DAYS}d churn + entry points",
-    ]
+
+    # Task conditioning: `focus` pulls matched files and their import-graph
+    # neighbors into full detail and collapses everything else to a directory
+    # summary. The map stops being a static ranking and becomes "start here".
+    focused: Set[str] = set()
+    neighbors: Set[str] = set()
+    if focus:
+        tokens = [t.lower() for t in focus if t]
+        for info in infos.values():
+            if any(t in info.path.lower() for t in tokens):
+                focused.add(info.path)
+        for path in focused:
+            info = infos[path]
+            neighbors |= info.importers | info.depends_on
+        neighbors -= focused
+
+    head = ["# Repository Map", ""]
+    if focus:
+        head.append(
+            f"{total} files · focus: {', '.join(focus)} — full detail for "
+            f"{len(focused)} matched file(s) and {len(neighbors)} import-graph "
+            f"neighbor(s); other files summarized by directory."
+        )
+    else:
+        head.append(
+            f"{total} files · {total_lines} lines of parsed code · "
+            f"ranked by import in-degree + {CHURN_DAYS}d churn + entry points"
+        )
 
     entries = [i for i in ranked if i.entry]
-    if entries:
+    if entries and not focus:
         head += ["", "## Entry points", ""]
         head += [f"- `{i.path}`" for i in entries[:10]]
         if len(entries) > 10:
@@ -690,22 +715,33 @@ def generate_repo_map(root: Path, budget: int = MAP_BUDGET_DEFAULT) -> str:
     used = sum(len(l) + 1 for l in head)
     truncated = False
 
-    for info in ranked:
-        # A widely-imported file earns a line even with no parsed symbols — its
-        # importer list is the point, and losing it to the collapsed bucket hides
-        # exactly the kind of shared module the ranking exists to surface.
-        if not info.symbols and info.in_degree < 2:
+    if focus:
+        detail_set = focused | neighbors
+        order = [infos[p] for p in sorted(detail_set, key=lambda p: (-infos[p].score, p))]
+    else:
+        detail_set = set()
+        order = ranked
+
+    for info in order:
+        # Focused files always render detail. Without focus, only entry points
+        # and widely-imported files do; a symbol-free leaf earns a compact line
+        # at most (its importer list is the point), otherwise it collapses.
+        wants_detail = info.path in focused or (not focus and (info.entry or info.in_degree >= 2))
+        if not wants_detail and not info.symbols and info.in_degree < 2:
             collapsed.append(info)
             continue
-        is_core = info.entry or info.in_degree >= 2
-        block = _render_detail(info) if is_core else _render_compact(info)
+        block = _render_detail(info) if wants_detail else _render_compact(info)
         if truncated or used + len(block) + 2 > budget - COLLAPSE_RESERVE:
             truncated = True
             collapsed.append(info)
             continue
         used += len(block) + 2
-        (core_blocks if is_core else support_blocks).append(block)
+        (core_blocks if info.path in detail_set or wants_detail else support_blocks).append(block)
         detailed += 1
+
+    if focus:
+        # Everything outside the task neighborhood is summarized, never detailed.
+        collapsed.extend(infos[p] for p in infos if p not in detail_set)
 
     out = list(head)
     if core_blocks:
@@ -884,6 +920,12 @@ def resolve_budget(value: Optional[str], default: int) -> int:
     raise SystemExit(f"--budget: expected a character count or one of {names}, got {raw!r}")
 
 
+def resolve_focus(value: Optional[str]) -> List[str]:
+    """Comma-separated focus tokens from flag or env (AGENT_CTX_FOCUS)."""
+    raw = value or os.environ.get("AGENT_CTX_FOCUS") or ""
+    return [t.strip() for t in raw.split(",") if t.strip()]
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     root = find_repo_root()
     agents_dir = root / ".agents"
@@ -911,7 +953,8 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_map(args: argparse.Namespace) -> int:
     root = find_repo_root()
-    map_content = generate_repo_map(root, budget=resolve_budget(args.budget, MAP_BUDGET_DEFAULT))
+    map_content = generate_repo_map(root, budget=resolve_budget(args.budget, MAP_BUDGET_DEFAULT),
+                                    focus=resolve_focus(getattr(args, "focus", None)))
 
     if args.stdout:
         print(map_content)
@@ -1024,7 +1067,8 @@ def cmd_dump(args: argparse.Namespace) -> int:
 
     spent = sum(len(chunk) for chunk in out) + sum(len(chunk) for chunk in tail)
     out.append("## Structure & Symbol Map (live)\n")
-    out.append(generate_repo_map(root, budget=max(DUMP_MAP_MIN_BUDGET, total - spent)).strip())
+    out.append(generate_repo_map(root, budget=max(DUMP_MAP_MIN_BUDGET, total - spent),
+                                 focus=resolve_focus(getattr(args, "focus", None))).strip())
     out.append("\n---\n")
     out.extend(tail)
 
@@ -1190,6 +1234,21 @@ def _test_dump_is_live(root: Path) -> None:
     assert stale not in dump, "dump should not echo stale cached repo_map.md content"
 
 
+def _test_focus(root: Path) -> None:
+    content = generate_repo_map(root, focus=["core.py"])
+
+    assert "focus:" in content, f"focused maps must announce the focus: {content[:200]}"
+    assert "class CoreApp" in content, "the focused file must render in full detail"
+    assert "`src/one.py`" in content, "importers of the focused file must be pulled in as neighbors"
+    assert "`src/leaf.py`" not in content, \
+        "files outside the task neighborhood must collapse to directory summaries"
+    assert "## Other files" in content, "the collapsed tail must be present"
+
+    # Focus is a lens, not a budget escape: a tight budget still truncates honestly.
+    small = generate_repo_map(root, budget=400, focus=["core.py"])
+    assert "budget" in small and "collapsed" in small, "focused maps still respect the budget"
+
+
 def _test_misc(root: Path) -> None:
     assert get_git_branch(Path(tempfile.gettempdir())) is None, \
         "non-git directories must report no branch, never a fabricated 'main'"
@@ -1254,6 +1313,7 @@ def run_self_test() -> int:
         _build_fixture(root)
         _test_symbols_and_graph(root)
         _test_budget_is_honest(root)
+        _test_focus(root)
         _test_misc(root)
         _test_git_integration(root)
         _test_dump_is_live(root)
@@ -1274,10 +1334,16 @@ def main() -> int:
                    f"({', '.join(f'{k}={v}' for k, v in BUDGET_PRESETS.items())}). "
                    f"Env: AGENT_CTX_BUDGET.")
     map_parser.add_argument("--budget", default=None, help=budget_help)
+    focus_help = ("Comma-separated files/substrings to pull into full detail with their "
+                  "import-graph neighbors; everything else collapses. Env: AGENT_CTX_FOCUS.")
+    map_parser.add_argument("--focus", default=None, help=focus_help)
 
     dump_parser = subparsers.add_parser(
         "dump", help="Print high-signal context snapshot (state, memory, decisions, map, activity)")
     dump_parser.add_argument("--budget", default=None, help=budget_help)
+    dump_parser.add_argument("--focus", default=None,
+                             help="Comma-separated files/substrings to pull into full detail "
+                                  "(with their import-graph neighbors); env: AGENT_CTX_FOCUS.")
 
     log_parser = subparsers.add_parser("log", help="Append an entry to .agents/activity.jsonl")
     log_parser.add_argument("--action", required=True, help="Short action name (e.g. 'feature-auth')")

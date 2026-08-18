@@ -47,6 +47,18 @@ When a budget binds, degradation is by priority and nothing vanishes silently:
 - **Decisions** always list **every ADR title**, expanding bodies newest-first. An ADR marked `**Superseded by**: ...` is kept for history but never expanded, so the file can grow without the snapshot growing with it.
 - **Map** collapses lower-ranked files by directory and reports the counts. Files with no parsed symbols are always summarized this way rather than listed individually, even at an unlimited budget — they are grouped, not dropped.
 
+### Focused Maps for a Task
+
+Give the map a task lens instead of a global ranking: files matching any focus substring render in full detail **together with their direct import-graph neighbors** (importers and imports); everything else collapses to a directory summary.
+
+```bash
+agent-ctx map --stdout --focus "auth.py,server"
+agent-ctx dump --focus "src/engine"
+AGENT_CTX_FOCUS="auth,api" agent-ctx dump
+```
+
+Use it on large repos when you already know the area of a task — it is the cheap, task-conditioned substitute for a global dump. Budget rules still apply; truncation is still announced.
+
 ## 2. Initialize a Project
 
 To set up the `.agents/` directory structure (`memory.md`, `decisions.md`, `repo_map.md`, `activity.jsonl`) in a new or existing repository:
