@@ -22,7 +22,13 @@ chmod +x "$SCRIPT_DIR/setup.sh" \
          "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux" \
          "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/render_status.sh" \
          "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/fetch_quotas.py" \
-         "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/helpers.sh"
+         "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/helpers.sh" \
+         "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/tmux-agent-alert.tmux" \
+         "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/alert_handler.sh" \
+         "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/render_alerts.sh" \
+         "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/clear_alert.sh" \
+         "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/jump_to_alert.sh" \
+         "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/helpers.sh"
 
 link_file() {
     local src="$1"
@@ -82,6 +88,10 @@ mkdir -p "$HOME/.tmux/plugins"
 if [ -d "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas" ]; then
     ln -sfn "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas" "$HOME/.tmux/plugins/tmux-agent-quotas"
     echo "  [LINK] Linked tmux plugin: $HOME/.tmux/plugins/tmux-agent-quotas"
+fi
+if [ -d "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert" ]; then
+    ln -sfn "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert" "$HOME/.tmux/plugins/tmux-agent-alert"
+    echo "  [LINK] Linked tmux plugin: $HOME/.tmux/plugins/tmux-agent-alert"
 fi
 
 # Skills (Claude & Gemini / Antigravity Global)

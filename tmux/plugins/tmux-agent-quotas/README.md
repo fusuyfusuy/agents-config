@@ -25,8 +25,8 @@ Add the plugin to your `~/.tmux.conf`:
 
 ```tmux
 set -g @plugin 'tmux-plugins/tpm'
-# Local development link or repository:
-run-shell ~/projects/fusuyfusuy/agents-config/tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux
+# Local symlinked plugin path:
+run-shell ~/.tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux
 ```
 
 ### Manual Installation (without TPM)
@@ -38,7 +38,7 @@ Clone or link the plugin directory, and add to your `~/.tmux.conf`:
 set -g status-right "#{agent_quotas} | %H:%M"
 
 # Run plugin
-run-shell ~/projects/fusuyfusuy/agents-config/tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux
+run-shell ~/.tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux
 ```
 
 ---

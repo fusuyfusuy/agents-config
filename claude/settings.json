@@ -13,7 +13,7 @@
   "effortLevel": "high",
   "tui": "fullscreen",
   "theme": "dark",
-  "inputNeededNotifEnabled": false,
+  "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": false,
   "model": "opus"
 }

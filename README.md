@@ -1,65 +1,152 @@
 # agents-config
 
-My personal config for running AI coding agents (Claude Code, Antigravity / Gemini CLI) across machines: shared operating principles, a lightweight project-memory CLI, tmux status integration, and editor/CLI settings — all kept in one repo and symlinked into place.
+A unified configuration and tooling suite for running AI coding agents (Claude Code, Antigravity / Gemini CLI) across machines: shared operating principles, zero-daemon project memory & AST mapping, error knowledge sharing, live tmux status integration, and Mosh-optimized alert dispatching.
 
-Published for reference, not as a product. It's opinionated, it changes whenever it suits me, and parts of it (paths, hostnames, trusted workspaces) are specific to my machine. Read before you symlink — don't run it blind.
+---
 
 ## Layout
 
-| Path | What it is |
+| Path | Description |
 | :--- | :--- |
-| `AGENTS.md` | Core rules doc — symlinked to `~/.claude/CLAUDE.md` and `~/.gemini/AGENTS.md`. Operating principles, subagent management protocol, project memory protocol, and "Ponytail" lazy-dev mode. |
-| `PROCESSES.md` | How-to recipes backing `AGENTS.md`: git worktree isolation, the error knowledge base. |
-| `bin/agent-ctx` | Zero-daemon, stdlib-only CLI for per-project memory, an AST-derived symbol map, and an activity log, stored in each target repo's `.agents/` directory. |
-| `bin/agent-kb/` | Zero-daemon CLI + SQLite-backed error knowledge base (`agent-kb`) — error-signature fingerprinting and fuzzy lookup for previously-resolved runtime errors. Has its own `pyproject.toml`/`uv.lock`; `setup.sh` builds its venv. |
-| `claude/` | Claude Code `settings.json`, statusline command, and skills (`agent-context`, `agent-processes`, `agent-error-kb`). |
-| `status/` | Statusline scripts for Antigravity / Gemini CLI (quota, branch, context usage). |
-| `tmux/plugins/tmux-agent-quotas/` | tmux plugin showing live Antigravity + Claude Code quota remaining in the status bar. |
-| `antigravity-cli/`, `config/` | Antigravity / Gemini CLI settings, keybindings, MCP server config. |
-| `setup.sh` | Symlink installer — see below. |
+| [`AGENTS.md`](AGENTS.md) | Core operating rules: subagent management protocol, project memory protocol, and "Ponytail" lazy-dev mode. Symlinked to `~/.gemini/AGENTS.md` and `~/.claude/CLAUDE.md`. |
+| [`PROCESSES.md`](PROCESSES.md) | Concrete how-to recipes backing `AGENTS.md` (worktree isolation, error KB workflow, memory lifecycle). |
+| [`bin/agent-ctx`](bin/agent-ctx) | Zero-daemon, stdlib-only CLI for AST-derived ranked symbol maps, project memory, and activity logging. |
+| [`bin/agent-kb/`](bin/agent-kb/) | Zero-daemon SQLite-backed error knowledge base CLI (`agent-kb`) with exact fingerprinting and token similarity search. |
+| [`tmux/plugins/tmux-agent-quotas/`](tmux/plugins/tmux-agent-quotas/) | Tmux plugin displaying live Antigravity and Claude Code subscription quotas in the status bar. |
+| [`tmux/plugins/tmux-agent-alert/`](tmux/plugins/tmux-agent-alert/) | Tmux plugin & hooks alerting via Mosh terminal bell, status flash, statusline badge, and `<prefix> A` focus jump when agents wait for input. |
+| [`status/`](status/) | Statusline scripts and live quota monitors for Antigravity / Gemini CLI. |
+| [`claude/`](claude/) | Claude Code settings (`settings.json`), statusline script, and agent skills (`agent-context`, `agent-processes`, `agent-error-kb`). |
+| [`antigravity-cli/`, `config/`](antigravity-cli/) | Antigravity / Gemini CLI settings, keybindings, and MCP server configuration. |
+| [`setup.sh`](setup.sh) | Symlink installer script. |
 
-## Install
+---
+
+## Installation
+
+Run the setup script to symlink all configurations, skills, binaries, and plugins into `$HOME`:
 
 ```bash
 ./setup.sh
 ```
 
-Symlinks everything into place under `$HOME` (`~/.claude`, `~/.gemini`, `~/.antigravity`, `~/.local/bin`, `~/.tmux/plugins`). If a target already exists and isn't one of these symlinks, it's backed up (`.bak.<timestamp>`) rather than overwritten. Safe to re-run.
+- Symlinks files under `~/.claude`, `~/.gemini`, `~/.antigravity`, `~/.local/bin`, and `~/.tmux/plugins`.
+- If an existing target file is not already symlinked, it is backed up to `<target>.bak.<timestamp>`.
+- Builds the Python venv for `agent-kb` via `uv` or `python3 -m venv`.
+- Safe to re-run at any time.
 
-## Philosophy
+---
 
-`AGENTS.md` is the actual source of truth; the short version:
+## Philosophy & Operating Principles
 
-- No backward-compatibility shims — remove obsolete paths instead of layering fallbacks.
-- Grow in layers: smallest thing that works end to end, then build on top of it.
-- **Ponytail mode**: before writing code, climb a ladder — does this need building at all, does it already exist in the codebase, does the stdlib/platform/an existing dependency cover it, can it be one line — and only then write the minimum that works. Lazy means efficient, not careless.
-- Subagents get delegated broad exploration and multi-file work, but must report back a summary, never raw output.
+All agents running under this configuration adhere to [`AGENTS.md`](AGENTS.md):
 
-## `agent-ctx`
+1. **No backward-compatibility shims**: Remove obsolete paths cleanly instead of layering migrations or fallbacks.
+2. **Grow in layers**: Build the smallest version that works end-to-end first, then add capabilities incrementally.
+3. **Ponytail (Lazy Senior Dev) ladder**:
+   - Does this need to be built at all? (YAGNI)
+   - Does a helper or pattern already exist in the codebase?
+   - Does the standard library or platform feature already cover it?
+   - Can this be one line?
+   - Only then: write the minimum code that works.
+4. **Subagent Protocol**: Keep the main context lean. Delegate multi-file exploration to subagents and require concise, structured summaries back.
 
-Run inside any project (not just this repo) to give an agent fast, cheap context before it starts grepping around:
+---
+
+## Tooling Guides
+
+### 1. `agent-ctx` — Project Context & Symbol Map CLI
+
+[`bin/agent-ctx`](bin/agent-ctx) provides fast, zero-daemon orientation for agents entering any repository:
 
 ```bash
-agent-ctx init   # scaffold .agents/{memory,decisions,repo_map}.md + activity.jsonl
-agent-ctx dump   # print memory + decisions + a freshly-generated symbol map + recent activity
-agent-ctx log --action "..." --summary "..." --files "a.py,b.py"
+# Scaffold .agents/ directory (memory.md, decisions.md, repo_map.md, activity.jsonl)
+agent-ctx init
+
+# One-shot context dump: working state, memory, ADRs, ranked symbol map, and activity
+agent-ctx dump
+
+# Generate or refresh AST repository symbol map
+agent-ctx map
+
+# Log a completed task or decision
+agent-ctx log --action "add-auth" --summary "Added OAuth2 middleware" --files "auth.py,server.py"
+
+# Inspect recent session activity
+agent-ctx history --limit 5
+
+# Run self-tests
+agent-ctx --test
 ```
 
-Zero dependencies, zero background service — everything lives in flat files under the target repo's `.agents/`.
+**Key Features:**
+- **Ranked Orientation**: Files are scored and ranked by import in-degree (AST-parsed Python and JS/TS path aliases), commit churn, and entry points rather than alphabetical order.
+- **Structural Budgeting**: `agent-ctx dump` respects token budgets (`--budget default|large|immense|unlimited`) and degrades gracefully: memory invariants $\rightarrow$ ADR titles $\rightarrow$ ranked map $\rightarrow$ collapsed directory summaries.
+- **Zero Daemon**: Pure Python standard library with no external dependencies.
 
-## `agent-kb`
+---
 
-Error-signature knowledge base backing the `agent-error-kb` skill — lookup verified fixes for errors you've hit before instead of re-debugging from scratch:
+### 2. `agent-kb` — Error Knowledge Base CLI
+
+[`bin/agent-kb/`](bin/agent-kb/) provides an error-signature knowledge base stored in a local SQLite database (`~/.agent-kb/kb.db`):
 
 ```bash
-agent-kb lookup "<error_log_or_stacktrace>"
-agent-kb record --error "..." --cause "..." --fix "..." --tags "a,b"
+# Search for verified fixes for an error or stack trace
+agent-kb lookup "fatal: Unable to create '.git/index.lock': File exists"
+
+# Record a verified fix once resolved
+agent-kb record \
+  --error "fatal: Unable to create '.git/index.lock': File exists" \
+  --cause "Stale lockfile left behind by crashed subprocess" \
+  --fix "pgrep -f 'git ' || rm -f .git/index.lock" \
+  --tags "git,lockfile,concurrency"
+
+# List top recurring error patterns
 agent-kb patterns
 ```
 
-SHA-256 exact-fingerprint matching plus token/n-gram fuzzy similarity over a local SQLite DB (`~/.agent-kb/kb.db`). Trimmed down from its original form before moving in here — the original also had an MCP server mode, but it didn't actually work against the current `mcp` SDK and had never been exercised, so it was dropped rather than carried over broken.
+**Key Features:**
+- **Hybrid Matching**: Combines SHA-256 exact fingerprint matching with token and n-gram fuzzy similarity.
+- **Shared Context**: Accessible by both Antigravity CLI and Claude Code across all workspace sessions.
 
-## Notes if you're browsing or forking this
+---
 
-- `antigravity-cli/settings.json` and `config/config.json` contain my machine's trusted-workspace paths and hostname — irrelevant noise if you're not me, don't copy them verbatim.
-- No license is attached. Treat this as read-only reference rather than something to redistribute.
+### 3. `tmux-agent-quotas` — Subscription Quota Monitor
+
+[`tmux/plugins/tmux-agent-quotas/`](tmux/plugins/tmux-agent-quotas/) monitors live remaining subscription quotas in the tmux status bar.
+
+Add to `~/.tmux.conf`:
+```tmux
+set -g status-right "#{agent_quotas} #[bold]#[fg=colour255]│ #(date +%H:%M) #[default]"
+run-shell ~/.tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux
+```
+
+**Interpolations:**
+- `#{agy_quota}`: Antigravity primary model quota and reset countdown.
+- `#{claude_quota}`: Claude Code 5-hour rolling and 7-day quota percentages.
+- `#{agent_quotas}`: Combined formatted quota block with color-coded thresholds.
+
+---
+
+### 4. `tmux-agent-alert` — Mosh & Tmux Alert Dispatcher
+
+[`tmux/plugins/tmux-agent-alert/`](tmux/plugins/tmux-agent-alert/) alerts you when an AI agent or background pane is waiting for user input.
+
+Add to `~/.tmux.conf`:
+```tmux
+set -g status-right "#{agent_alerts}#{agent_quotas} #[bold]#[fg=colour255]│ #(date +%H:%M) #[default]"
+run-shell ~/.tmux/plugins/tmux-agent-alert/tmux-agent-alert.tmux
+```
+
+**Key Features:**
+- **Mosh Bell Forwarding**: Emits ASCII `\a` (BEL) to attached client TTYs so Mosh triggers local terminal audio/visual bells (Ghostty, iTerm2, Kitty, WezTerm, Alacritty).
+- **Statusline Badge**: Shows `#{agent_alerts}` when panes require attention (e.g. `🔔 WAITING [1:agy]`).
+- **Instant Focus Jump**: Press `<prefix> A` to switch directly to the waiting window and pane.
+- **Auto-Clearing**: Alerts dismiss automatically as soon as you focus the pane.
+- **Push Notifications**: Optional [ntfy.sh](https://ntfy.sh) or custom webhook integration.
+
+---
+
+### 5. Statusline Visualizations
+
+- **Antigravity ([`status/statusline.sh`](status/statusline.sh))**: Renders agent state (`READY`, `THINKING`, `WORKING`, `TOOL`), active git branch, model name, fine-grained Unicode context bar, subagent count, task count, and sandbox status.
+- **Claude Code ([`claude/statusline-command.sh`](claude/statusline-command.sh))**: Displays workspace path, git branch/dirty state, model, context usage %, and rolling rate limit resets.

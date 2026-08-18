@@ -62,6 +62,21 @@ NUM_COLOR="${FG_BRIGHT_WHITE}${B}"
 PCT_FMT=$(LC_NUMERIC=C printf "%.1f" "$USED_PCT")
 PCT_INT=${USED_PCT%.*}; PCT_INT=${PCT_INT:-0}
 
+# ─── Alert on Agent Input Needed (Transition from active -> idle) ────────────
+if [ -n "${TMUX_PANE:-}" ]; then
+  STATE_FILE="/tmp/agy-state-${TMUX_PANE//%/pane_}"
+  PREV_STATE=""
+  [ -f "$STATE_FILE" ] && PREV_STATE="$(cat "$STATE_FILE" 2>/dev/null || true)"
+  echo "$STATE" > "$STATE_FILE" 2>/dev/null || true
+
+  if [ "$STATE" = "idle" ] && [ -n "$PREV_STATE" ] && [ "$PREV_STATE" != "idle" ]; then
+    ALERT_HANDLER="$HOME/.tmux/plugins/tmux-agent-alert/scripts/alert_handler.sh"
+    if [ -x "$ALERT_HANDLER" ]; then
+      ("$ALERT_HANDLER" "$TMUX_PANE" "input_needed" "" "Antigravity" >/dev/null 2>&1 &)
+    fi
+  fi
+fi
+
 # ─── State Indicator (No background colors) ──────────────────────────────────
 case "$STATE" in
   idle)     S="${FG_BRIGHT_GREEN}${B}● READY${R}" ;;
