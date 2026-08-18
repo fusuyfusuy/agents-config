@@ -17,7 +17,7 @@ A unified configuration and tooling suite for running AI coding agents (Claude C
 | [`status/`](status/) | Statusline scripts and live quota monitors for Antigravity / Gemini CLI. |
 | [`claude/`](claude/) | Claude Code settings (`settings.json`), statusline script, and agent skills (`agent-context`, `agent-processes`, `agent-error-kb`). |
 | [`antigravity-cli/`, `config/`](antigravity-cli/) | Antigravity / Gemini CLI settings, keybindings, and MCP server configuration. |
-| [`setup.sh`](setup.sh) | Symlink installer script. |
+| [`setup.sh`](setup.sh) | Interactive installer: detects installed agents (Claude Code, AGY, pi), asks which to configure, then symlinks each agent's config, skills, binaries, and plugins. |
 
 ---
 
@@ -29,7 +29,21 @@ Run the setup script to symlink all configurations, skills, binaries, and plugin
 ./setup.sh
 ```
 
-- Symlinks files under `~/.claude`, `~/.gemini`, `~/.antigravity`, `~/.local/bin`, and `~/.tmux/plugins`.
+`setup.sh` detects which agents are installed on the machine (Claude Code, AGY / Antigravity-Gemini, pi) and asks which ones to configure:
+
+```
+==> Detected agents:
+    [c] Claude Code              : installed
+    [a] AGY (Antigravity/Gemini)  : installed
+    [p] pi                       : installed
+
+Which agents should I configure here?
+  Enter letters to select (e.g. 'cap'), 'all', 'none', or leave blank for all detected:
+```
+
+- Enter letters to configure exactly those agents, `all` / blank for every detected agent, or `none` for shared tooling only (CLI binaries, `agent-kb`, tmux plugins always install).
+- Non-interactive: with `AGENTS=cap` (a letter set) you override the prompt; without a TTY (piped/CI) the script configures all detected agents and never hangs on `read`.
+- Symlinks files under `~/.claude`, `~/.gemini`, `~/.antigravity`, `~/.pi/agent` (pi global instructions + skills), `~/.local/bin`, and `~/.tmux/plugins`.
 - If an existing target file is not already symlinked, it is backed up to `<target>.bak.<timestamp>`.
 - Builds the Python venv for `agent-kb` via `uv` or `python3 -m venv`.
 - Safe to re-run at any time.
@@ -146,7 +160,16 @@ run-shell ~/.tmux/plugins/tmux-agent-alert/tmux-agent-alert.tmux
 
 ---
 
-### 5. Statusline Visualizations
+### 5. pi (Coding Agent)
+
+`setup.sh` configures [pi](https://pi.dev) — the terminal coding harness used in this repo — by fanning out the same shared resources it installs for Claude Code and AGY:
+
+- `AGENTS.md` → `~/.pi/agent/AGENTS.md` (pi global instructions)
+- `claude/skills/*` → `~/.pi/agent/skills/` (pi discovers `SKILL.md` directories there)
+
+The skills (`agent-context`, `agent-error-kb`, `agent-processes`) work unchanged across all three harnesses; pi's model/provider settings live in `~/.pi/agent/settings.json`.
+
+### 6. Statusline Visualizations
 
 - **Antigravity ([`status/statusline.sh`](status/statusline.sh))**: Renders agent state (`READY`, `THINKING`, `WORKING`, `TOOL`), active git branch, model name, fine-grained Unicode context bar, subagent count, task count, and sandbox status.
 - **Claude Code ([`claude/statusline-command.sh`](claude/statusline-command.sh))**: Displays workspace path, git branch/dirty state, model, context usage %, and rolling rate limit resets.
