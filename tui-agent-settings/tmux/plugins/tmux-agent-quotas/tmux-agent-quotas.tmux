@@ -3,11 +3,6 @@ CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/helpers.sh
 source "$CURRENT_DIR/scripts/helpers.sh"
 
-agy_quota_interpolation=(
-  "\#{agy_quota}"
-  "#($CURRENT_DIR/scripts/render_status.sh agy)"
-)
-
 claude_quota_interpolation=(
   "\#{claude_quota}"
   "#($CURRENT_DIR/scripts/render_status.sh claude)"
@@ -18,9 +13,9 @@ agent_quotas_interpolation=(
   "#($CURRENT_DIR/scripts/render_status.sh combined)"
 )
 
-pi_spend_interpolation=(
-  "\#{pi_spend}"
-  "#($CURRENT_DIR/scripts/render_status.sh pi)"
+opencode_go_interpolation=(
+  "\#{opencode_go}"
+  "#($CURRENT_DIR/scripts/render_status.sh ocgo)"
 )
 
 update_tmux_option() {
@@ -29,10 +24,9 @@ update_tmux_option() {
   option_value="$(get_tmux_option "$option" "")"
   if [ -n "$option_value" ]; then
     local new_option_value="$option_value"
-    new_option_value="${new_option_value//${agy_quota_interpolation[0]}/${agy_quota_interpolation[1]}}"
     new_option_value="${new_option_value//${claude_quota_interpolation[0]}/${claude_quota_interpolation[1]}}"
     new_option_value="${new_option_value//${agent_quotas_interpolation[0]}/${agent_quotas_interpolation[1]}}"
-    new_option_value="${new_option_value//${pi_spend_interpolation[0]}/${pi_spend_interpolation[1]}}"
+    new_option_value="${new_option_value//${opencode_go_interpolation[0]}/${opencode_go_interpolation[1]}}"
     set_tmux_option "$option" "$new_option_value"
   fi
 }

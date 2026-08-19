@@ -7,21 +7,17 @@ CACHE_DIR="$HOME/.cache/agent-quotas"
 MAX_AGE=30
 
 case "$TARGET" in
-  agy)
-    CACHE_FILE="$CACHE_DIR/agy.txt"
-    DEFAULT_TEXT="#[fg=colour244]AGY --#[default]"
-    ;;
   claude)
     CACHE_FILE="$CACHE_DIR/claude.txt"
     DEFAULT_TEXT="#[fg=colour244]CC --#[default]"
     ;;
-  pi)
-    CACHE_FILE="$CACHE_DIR/pi.txt"
-    DEFAULT_TEXT="#[fg=colour244]PI --#[default]"
+  ocgo)
+    CACHE_FILE="$CACHE_DIR/opencode_go.txt"
+    DEFAULT_TEXT="#[fg=colour244]OCGO --#[default]"
     ;;
   *)
     CACHE_FILE="$CACHE_DIR/combined.txt"
-    DEFAULT_TEXT="#[fg=colour244]AGY -- │ CC -- │ PI --#[default]"
+    DEFAULT_TEXT="#[fg=colour244]CC -- │ OCGO --#[default]"
     ;;
 esac
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Aggregates Antigravity (agy) and Claude Code subscription quotas,
-and generates pre-rendered tmux status segments.
+"""Aggregates Antigravity (agy), Claude Code, and OpenCode Go subscription
+quotas, and generates pre-rendered tmux status segments.
 """
 import os
 import sys
@@ -26,7 +26,28 @@ OUTPUT_STATUS_JSON = os.path.join(CACHE_DIR, "status.json")
 OUTPUT_AGY_TXT = os.path.join(CACHE_DIR, "agy.txt")
 OUTPUT_CLAUDE_TXT = os.path.join(CACHE_DIR, "claude.txt")
 OUTPUT_PI_TXT = os.path.join(CACHE_DIR, "pi.txt")
+OUTPUT_OCGO_TXT = os.path.join(CACHE_DIR, "opencode_go.txt")
 OUTPUT_COMBINED_TXT = os.path.join(CACHE_DIR, "combined.txt")
+
+def _resolve_ocgo_key() -> str:
+    """Resolve OpenCode Go API key: env var first, then pi auth.json fallback."""
+    key = os.environ.get("OPENCODE_GO_API_KEY", "")
+    if key:
+        return key
+    auth_path = os.path.expanduser("~/.pi/agent/auth.json")
+    try:
+        with open(auth_path, "r") as f:
+            data = json.load(f)
+        return data.get("opencode-go", {}).get("key", "")
+    except Exception:
+        return ""
+
+
+OCGO_API_KEY = _resolve_ocgo_key()
+OCGO_USAGE_URL = os.environ.get(
+    "OPENCODE_GO_USAGE_URL",
+    "https://opencode.ai/zen/go/v1/usage",
+)
 
 PI_SESSIONS_DIR = os.environ.get(
     "PI_SESSIONS_DIR",
@@ -330,6 +351,7 @@ def select_gating_quota(models: dict, active_model_name: str = "") -> dict:
 
 
 def select_claude_gating_quota(claude_data: dict) -> dict | None:
+    """Always surface the 5h rolling window; fall back to 7d only if 5h is absent."""
     if not claude_data:
         return None
 
@@ -338,29 +360,23 @@ def select_claude_gating_quota(claude_data: dict) -> dict | None:
     five_h_reset = claude_data.get("five_hour_resets_at")
     seven_d_reset = claude_data.get("seven_day_resets_at")
 
-    five_h_rem = (100.0 - float(five_h_used)) if five_h_used is not None else None
-    seven_d_rem = (100.0 - float(seven_d_used)) if seven_d_used is not None else None
-
-    candidates = []
-    if five_h_rem is not None:
-        candidates.append({
+    if five_h_used is not None:
+        gating = {
             "window": "5h",
-            "remaining_pct": five_h_rem,
+            "remaining_pct": 100.0 - float(five_h_used),
             "resets_in": format_epoch_reset(five_h_reset) if five_h_reset else "",
             "reset_epoch": float(five_h_reset) if five_h_reset else float("inf"),
-        })
-    if seven_d_rem is not None:
-        candidates.append({
+        }
+    elif seven_d_used is not None:
+        gating = {
             "window": "7d",
-            "remaining_pct": seven_d_rem,
+            "remaining_pct": 100.0 - float(seven_d_used),
             "resets_in": format_epoch_reset(seven_d_reset) if seven_d_reset else "",
             "reset_epoch": float(seven_d_reset) if seven_d_reset else float("inf"),
-        })
-
-    if not candidates:
+        }
+    else:
         return None
 
-    gating = min(candidates, key=lambda c: (c["remaining_pct"], c["reset_epoch"]))
     gating["model"] = claude_data.get("model", "Claude")
     return gating
 
@@ -428,6 +444,75 @@ def format_pi_spend(cost: float) -> str:
     return f"${cost:.2f}"
 
 
+def fetch_opencode_go_usage() -> dict:
+    """Fetch OpenCode Go usage from the official endpoint.
+
+    Returns dict with rolling/weekly/monthly window data, or empty dict on failure.
+    """
+    api_key = OCGO_API_KEY
+    if not api_key:
+        return {}
+
+    try:
+        conn = http.client.HTTPSConnection("opencode.ai", timeout=5)
+        conn.request(
+            "GET",
+            "/zen/go/v1/usage",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Accept": "application/json",
+            },
+        )
+        res = conn.getresponse()
+        raw = res.read().decode("utf-8", "replace")
+        if res.status == 401:
+            return {}
+        if res.status < 200 or res.status >= 300:
+            return {}
+        data = json.loads(raw)
+        return data.get("usage", {})
+    except Exception:
+        return {}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def select_ocgo_gating_quota(usage: dict) -> dict | None:
+    """Return the tightest OpenCode Go quota window.
+
+    Prefers the rolling (5h) window as the primary gating constraint.
+    Falls back to weekly or monthly if rolling is missing.
+    """
+    if not usage:
+        return None
+
+    windows = []
+    for key, label in (("rolling", "5h"), ("weekly", "wk"), ("monthly", "mo")):
+        w = usage.get(key)
+        if not w or w.get("status") != "ok":
+            continue
+        pct = float(w.get("percent", 0))
+        reset_at = w.get("resetsAt", "")
+        windows.append({
+            "label": label,
+            "remaining_pct": 100.0 - pct,
+            "resets_in": format_reset_time(reset_at),
+            "reset_epoch": (
+                datetime.fromisoformat(reset_at.replace("Z", "+00:00")).timestamp()
+                if reset_at else float("inf")
+            ),
+        })
+
+    if not windows:
+        return None
+
+    # Lowest remaining % wins; ties broken by soonest reset
+    return min(windows, key=lambda w: (w["remaining_pct"], w["reset_epoch"]))
+
+
 def get_color_tag(pct: float, high: str = "#[fg=colour120,bold]", med: str = "#[fg=colour221,bold]", low: str = "#[fg=colour203,bold]") -> str:
     if pct >= 50.0:
         return high
@@ -439,48 +524,27 @@ def get_color_tag(pct: float, high: str = "#[fg=colour120,bold]", med: str = "#[
 def main():
     os.makedirs(CACHE_DIR, exist_ok=True)
 
-    # 1. Fetch Antigravity quota
-    agy_data = fetch_live_agy_quota()
-    if not agy_data:
-        agy_data = load_cached_agy_quota()
-
-    # Determine active gating quota for AGY
-    agy_models = agy_data.get("models", {})
+    # 1. Disabled: Antigravity quota (re-enable by uncommenting)
+    # agy_data = fetch_live_agy_quota()
+    # if not agy_data:
+    #     agy_data = load_cached_agy_quota()
     agy_summary = None
-    if agy_models:
-        active_model = ""
-        if os.path.exists(STATUS_STATE_FILE):
-            state = read_json_file(STATUS_STATE_FILE)
-            active_model = state.get("model", "")
-
-        selected_model = select_gating_quota(agy_models, active_model)
-        if selected_model:
-            pct = float(selected_model.get("remaining_percentage", 0.0))
-            refreshes_in = selected_model.get("refreshes_in") or format_reset_time(selected_model.get("reset_time", ""))
-            agy_summary = {
-                "name": selected_model.get("name", "AGY"),
-                "remaining_pct": pct,
-                "refreshes_in": refreshes_in,
-            }
 
     # 2. Fetch Claude quota
     claude_data = load_claude_quota()
     claude_summary = select_claude_gating_quota(claude_data)
 
-    # 2b. Pi today's spend (summed from persisted session costs)
-    pi_cost = compute_pi_today_spend()
-    pi_txt = f"#[fg=colour214]PI {format_pi_spend(pi_cost)}#[default]"
+    # 2b. Disabled: Pi today's spend (re-enable by uncommenting)
+    # pi_cost = compute_pi_today_spend()
+    # pi_txt = f"#[fg=colour214]PI {format_pi_spend(pi_cost)}#[default]"
+
+    # 2c. OpenCode Go usage
+    ocgo_usage = fetch_opencode_go_usage()
+    ocgo_summary = select_ocgo_gating_quota(ocgo_usage)
 
     # 3. Build tmux formatted strings
-    # AGY Segment
-    if agy_summary:
-        pct = agy_summary["remaining_pct"]
-        color = get_color_tag(pct)
-        rst = agy_summary["refreshes_in"]
-        rst_str = f" {rst}" if rst else ""
-        agy_txt = f"{color}AGY {pct:.0f}%{rst_str}#[default]"
-    else:
-        agy_txt = "#[fg=colour244]AGY --#[default]"
+    # AGY Segment (disabled)
+    agy_txt = ""
 
     # Claude Segment (active gating constraint)
     if claude_summary and claude_summary.get("remaining_pct") is not None:
@@ -492,24 +556,32 @@ def main():
     else:
         claude_txt = "#[fg=colour244]CC --#[default]"
 
+    # OpenCode Go Segment (active gating constraint)
+    if ocgo_summary and ocgo_summary.get("remaining_pct") is not None:
+        rem = ocgo_summary["remaining_pct"]
+        col = get_color_tag(rem)
+        rst = ocgo_summary.get("resets_in", "")
+        rst_str = f" {rst}" if rst else ""
+        ocgo_txt = f"{col}OCGO {rem:.0f}%{rst_str}#[default]"
+    else:
+        ocgo_txt = "#[fg=colour244]OCGO --#[default]"
+
     # Combined Segment
     combined_parts = []
-    if agy_summary:
-        combined_parts.append(agy_txt)
     if claude_summary and claude_summary.get("remaining_pct") is not None:
         combined_parts.append(claude_txt)
-    combined_parts.append(pi_txt)
+    if ocgo_summary and ocgo_summary.get("remaining_pct") is not None:
+        combined_parts.append(ocgo_txt)
 
     if combined_parts:
         combined_txt = " #[fg=colour240]│#[default] ".join(combined_parts)
     else:
-        combined_txt = f"{agy_txt} #[fg=colour240]│#[default] {claude_txt}"
+        combined_txt = f"{claude_txt} #[fg=colour240]│#[default] {ocgo_txt}"
 
     # Write files atomically
     for target_file, content in [
-        (OUTPUT_AGY_TXT, agy_txt),
         (OUTPUT_CLAUDE_TXT, claude_txt),
-        (OUTPUT_PI_TXT, pi_txt),
+        (OUTPUT_OCGO_TXT, ocgo_txt),
         (OUTPUT_COMBINED_TXT, combined_txt),
     ]:
         tmp = f"{target_file}.tmp"
@@ -520,9 +592,8 @@ def main():
     # Save full status json
     status_payload = {
         "timestamp": time.time(),
-        "antigravity": agy_summary,
         "claude": claude_summary,
-        "pi": {"today_cost": pi_cost, "display": pi_txt},
+        "opencode_go": ocgo_summary,
     }
     tmp_json = f"{OUTPUT_STATUS_JSON}.tmp"
     with open(tmp_json, "w", encoding="utf-8") as f:

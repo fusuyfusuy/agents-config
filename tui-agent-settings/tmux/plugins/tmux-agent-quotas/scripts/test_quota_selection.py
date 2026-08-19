@@ -7,7 +7,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STATUS_PY = os.path.join(HERE, "..", "..", "..", "..", "status", "status.py")
+STATUS_PY = os.path.join(HERE, "..", "..", "..", "..", "antigravity-cli", "status.py")
 
 
 def load_module(name, path):
@@ -68,27 +68,35 @@ def check(module_name, path):
 def check_claude_gating():
     fq = load_module("fetch_quotas", os.path.join(HERE, "fetch_quotas.py"))
 
-    # 7d is lower (38% rem) than 5h (92% rem) -> 7d gates
-    claude_7d_gating = {
+    # 5h always gates when present, regardless of which window is tighter
+    claude_7d_tighter = {
         "model": "Claude 3.7",
         "five_hour_used_pct": 8.0,
         "five_hour_resets_at": 1787095000,
         "seven_day_used_pct": 62.0,
         "seven_day_resets_at": 1787180000,
     }
-    res = fq.select_claude_gating_quota(claude_7d_gating)
-    assert res["window"] == "7d" and res["remaining_pct"] == 38.0, f"Claude gating expected 7d 38%, got {res}"
+    res = fq.select_claude_gating_quota(claude_7d_tighter)
+    assert res["window"] == "5h" and res["remaining_pct"] == 92.0, f"Claude gating expected 5h 92%, got {res}"
 
-    # 5h is lower (10% rem) than 7d (50% rem) -> 5h gates
-    claude_5h_gating = {
+    claude_5h_tighter = {
         "model": "Claude 3.7",
         "five_hour_used_pct": 90.0,
         "five_hour_resets_at": 1787095000,
         "seven_day_used_pct": 50.0,
         "seven_day_resets_at": 1787180000,
     }
-    res = fq.select_claude_gating_quota(claude_5h_gating)
+    res = fq.select_claude_gating_quota(claude_5h_tighter)
     assert res["window"] == "5h" and res["remaining_pct"] == 10.0, f"Claude gating expected 5h 10%, got {res}"
+
+    # 5h missing -> falls back to 7d
+    claude_5h_missing = {
+        "model": "Claude 3.7",
+        "seven_day_used_pct": 62.0,
+        "seven_day_resets_at": 1787180000,
+    }
+    res = fq.select_claude_gating_quota(claude_5h_missing)
+    assert res["window"] == "7d" and res["remaining_pct"] == 38.0, f"Claude gating expected 7d fallback 38%, got {res}"
 
     print("claude_gating: OK")
 
