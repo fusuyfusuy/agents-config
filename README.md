@@ -39,10 +39,17 @@ Run the setup script to symlink all configurations, skills, binaries, and plugin
 
 Which agents should I configure here?
   Enter letters to select (e.g. 'cap'), 'all', 'none', or leave blank for all detected:
+
+Optional tmux integration:
+  [p] plugins    : symlink tmux-agent-quotas + tmux-agent-alert into ~/.tmux/plugins
+  [s] statusline : append the agent status bar + plugin hooks to ~/.tmux.conf
+  Enter letters (e.g. 'ps'), 'all', 'none', or leave blank for all:
 ```
 
-- Enter letters to configure exactly those agents, `all` / blank for every detected agent, or `none` for shared tooling only (CLI binaries, `agent-kb`, tmux plugins always install).
-- Non-interactive: with `AGENTS=cap` (a letter set) you override the prompt; without a TTY (piped/CI) the script configures all detected agents and never hangs on `read`.
+- Enter letters to configure exactly those agents, `all` / blank for every detected agent, or `none` for shared tooling only (CLI binaries, `agent-kb` always install).
+- The tmux prompt asks separately about **plugins** (`p`) and **statusline** (`s`). Choosing the statusline auto-installs the plugins it renders against; `none`/blank-for-all behave the same as for agents.
+- Non-interactive: with `AGENTS` you override the agent prompt; with `TMUX_SETUP=ps|all|none` you override the tmux prompt. Without a TTY (piped/CI) both defaults install everything detected and never hang on `read`.
+- The statusline block is appended to `~/.tmux.conf` behind a marker line, so re-running setup is idempotent and existing config is never rewritten.
 - Symlinks files under `~/.claude`, `~/.gemini`, `~/.antigravity`, `~/.pi/agent` (pi global instructions + skills), `~/.local/bin`, and `~/.tmux/plugins`.
 - If an existing target file is not already symlinked, it is backed up to `<target>.bak.<timestamp>`.
 - Builds the Python venv for `agent-kb` via `uv` or `python3 -m venv`.

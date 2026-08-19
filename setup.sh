@@ -61,6 +61,49 @@ choose_agents() {
 }
 
 # --------------------------------------------------------------------------
+# tmux selection
+# --------------------------------------------------------------------------
+
+# Map a tmux selection string ('ps', 'all', 'none', ...) onto the install flags.
+# 'p' = plugins (symlink into ~/.tmux/plugins), 's' = statusline (~/.tmux.conf).
+resolve_tmux() {
+    local sel
+    sel=$(echo "${1:-all}" | tr '[:upper:]' '[:lower:]')
+
+    INSTALL_TMUX_PLUGINS=false; INSTALL_TMUX_STATUSLINE=false
+    case "$sel" in
+        all)  INSTALL_TMUX_PLUGINS=true; INSTALL_TMUX_STATUSLINE=true ;;
+        none) : ;;
+        *)    [[ "$sel" == *p* ]] && INSTALL_TMUX_PLUGINS=true
+              [[ "$sel" == *s* ]] && INSTALL_TMUX_STATUSLINE=true ;;
+    esac
+}
+
+choose_tmux() {
+    # Non-interactive override for automation/CI: TMUX_SETUP='ps' | 'all' | 'none' | letters.
+    if [ -n "${TMUX_SETUP:-}" ]; then
+        echo "==> TMUX_SETUP override: installing '$TMUX_SETUP'."
+        resolve_tmux "$TMUX_SETUP"
+        return
+    fi
+
+    # Non-interactive (piped/CI): install everything, never hang on read.
+    if [ ! -t 0 ]; then
+        INSTALL_TMUX_PLUGINS=true; INSTALL_TMUX_STATUSLINE=true
+        echo "==> Non-interactive shell: installing tmux plugins + statusline."
+        return
+    fi
+
+    echo
+    echo "Optional tmux integration:"
+    echo "  [p] plugins    : symlink tmux-agent-quotas + tmux-agent-alert into ~/.tmux/plugins"
+    echo "  [s] statusline : append the agent status bar + plugin hooks to ~/.tmux.conf"
+    echo "  Enter letters (e.g. 'ps'), 'all', 'none', or leave blank for all:"
+    read -r sel
+    resolve_tmux "${sel:-all}"
+}
+
+# --------------------------------------------------------------------------
 # linking
 # --------------------------------------------------------------------------
 
@@ -109,17 +152,7 @@ install_shared() {
              "$SCRIPT_DIR/status/status.py" \
              "$SCRIPT_DIR/status/statusline.sh" \
              "$SCRIPT_DIR/status/agy-quota-cache.py" \
-             "$SCRIPT_DIR/claude/statusline-command.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/render_status.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/fetch_quotas.py" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/helpers.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/tmux-agent-alert.tmux" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/alert_handler.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/render_alerts.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/clear_alert.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/jump_to_alert.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/helpers.sh"
+             "$SCRIPT_DIR/claude/statusline-command.sh"
 
     mkdir -p "$HOME/.local/bin"
 
@@ -138,7 +171,20 @@ install_shared() {
         link_file "$AGENT_KB_DIR/.venv/bin/agent-kb"        "$HOME/.local/bin/agent-kb"
     fi
 
-    # Tmux Plugins
+    }
+
+install_tmux() {
+    chmod +x "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux" \
+             "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/render_status.sh" \
+             "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/fetch_quotas.py" \
+             "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/helpers.sh" \
+             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/tmux-agent-alert.tmux" \
+             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/alert_handler.sh" \
+             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/render_alerts.sh" \
+             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/clear_alert.sh" \
+             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/jump_to_alert.sh" \
+             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/helpers.sh"
+
     mkdir -p "$HOME/.tmux/plugins"
     if [ -d "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas" ]; then
         ln -sfn "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas" "$HOME/.tmux/plugins/tmux-agent-quotas"
@@ -148,6 +194,25 @@ install_shared() {
         ln -sfn "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert" "$HOME/.tmux/plugins/tmux-agent-alert"
         echo "  [LINK] Linked tmux plugin: $HOME/.tmux/plugins/tmux-agent-alert"
     fi
+}
+
+# Append the agent statusline block to ~/.tmux.conf (idempotent; never destroys
+# an existing tmux.conf). Requires the plugins symlinked by install_tmux.
+install_tmux_statusline() {
+    local tmux_conf="$HOME/.tmux.conf"
+    local marker="# --- agents-config: agent quotas + alert statusline ---"
+    if [ -f "$tmux_conf" ] && grep -qF "$marker" "$tmux_conf"; then
+        echo "  [OK] Already configured: $tmux_conf (agent statusline present)"
+        return 0
+    fi
+    {
+        echo
+        echo "$marker"
+        echo 'set -g status-right "#{agent_alerts}#{agent_quotas} #[bold]#[fg=colour255]│ #(date +%H:%M) #[default]"'
+        echo 'run-shell ~/.tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux'
+        echo 'run-shell ~/.tmux/plugins/tmux-agent-alert/tmux-agent-alert.tmux'
+    } >> "$tmux_conf"
+    echo "  [APPEND] Configured $tmux_conf (agent statusline + plugin hooks)"
 }
 
 install_claude() {
@@ -194,10 +259,17 @@ install_pi() {
 
 detect_agents
 choose_agents
+choose_tmux
 
 install_shared
 if [ "$INSTALL_CLAUDE" = true ]; then install_claude; fi
 if [ "$INSTALL_AGY"    = true ]; then install_agy; fi
 if [ "$INSTALL_PI"     = true ]; then install_pi; fi
+if [ "$INSTALL_TMUX_STATUSLINE" = true ]; then
+    [ "$INSTALL_TMUX_PLUGINS" = false ] && INSTALL_TMUX_PLUGINS=true && \
+        echo "==> Statusline requires the plugins; installing them too."
+fi
+if [ "$INSTALL_TMUX_PLUGINS" = true ]; then install_tmux; fi
+if [ "$INSTALL_TMUX_STATUSLINE" = true ]; then install_tmux_statusline; fi
 
 echo "==> Setup completed successfully!"
