@@ -4,6 +4,18 @@ Concrete recipes supporting the Subagent Management Protocol in [`AGENTS.md`](AG
 
 ---
 
+## Change Protocol (Explore → Plan → Approve → Execute)
+
+Rule in [`AGENTS.md`](AGENTS.md). Only non-trivial work (multi-file or non-trivial logic) goes through the gate; one-liners execute directly.
+
+- Present a one-paragraph plan before editing: **files**, **approach**, **verification**.
+- Wait for explicit approval; re-present if the approved scope changes.
+- Execute the smallest change, run the check, report the result.
+
+Example plan:
+
+> Touch `collect_agent_usage.py` (add `parse_x` mirroring `parse_y`) and `test_collect_agent_usage.py` (one fixture). Verify: `python3 test_collect_agent_usage.py`.
+
 ## Workspace Isolation (Git Worktrees)
 
 For parallel or isolated work, use a dedicated worktree instead of the primary working directory:

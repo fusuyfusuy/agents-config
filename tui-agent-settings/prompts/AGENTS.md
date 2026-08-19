@@ -7,6 +7,17 @@
 - Keep components modular and concerns clearly separated.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 
+## Explore → Plan → Approve → Execute
+
+For non-trivial work (multi-file or non-trivial logic; same threshold as the Subagent Management Protocol below), run a change as four gated phases. Trivial one-liners skip straight to Execute — this gate is proportional to complexity, never ceremony.
+
+- **Explore**: Before writing anything, trace how the affected code works and state where the change lands. A diff you don't understand isn't lazy, it's a second bug.
+- **Plan**: Present a short one-paragraph plan — files to touch, approach, how you'll verify. The plan is a contract, not a document.
+- **Approve**: Stop and wait for explicit approval before writing code. If the approved scope changes mid-flight, re-present before continuing.
+- **Execute**: Apply the smallest change that satisfies the plan, then run the verification and report the result.
+
+Delegation and worktree isolation for the Explore and Execute phases follow the Subagent Management Protocol below. This gate never suspends the Ponytail ladder — same "understand first, then climb" discipline.
+
 ## Subagent Management Protocol
 
 - Keep the main context lean: plan and decide in the main thread; delegate broad exploration (>2 files) and multi-file implementation to a subagent.
