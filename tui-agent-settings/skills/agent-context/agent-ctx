@@ -991,6 +991,10 @@ def cmd_log(args: argparse.Namespace) -> int:
     with open(act_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
     print(f"Logged action '{args.action}' to {act_file.relative_to(root)}")
+    if len(args.summary) > ACTIVITY_SUMMARY_LIMIT:
+        print(f"Note: summary is {len(args.summary)} chars — dump's Recent Activity elides past "
+              f"{ACTIVITY_SUMMARY_LIMIT}. Keep it a high-level one-liner (what changed and why it "
+              f"matters); save step-by-step detail for the commit message.")
     print("Reminder: if this introduced a new invariant, gotcha, or architecture decision, update .agents/memory.md or .agents/decisions.md.")
     return 0
 
@@ -1266,6 +1270,30 @@ def _test_dump_is_live(root: Path) -> None:
     assert stale not in dump, "dump should not echo stale cached repo_map.md content"
 
 
+def _test_log_summary_length(root: Path) -> None:
+    # cmd_log should nudge toward the high-level, one-liner summaries dump's
+    # Recent Activity is designed to show, not silently accept prose that will
+    # just get elided later with no feedback to whoever wrote it.
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(root)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cmd_log(argparse.Namespace(action="a", summary="short and high-level", files=""))
+        assert "Note:" not in buf.getvalue(), "a summary within the limit must not be flagged"
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cmd_log(argparse.Namespace(action="b", summary="s" * 300, files=""))
+        out = buf.getvalue()
+        assert "Note:" in out and "300 chars" in out, \
+            f"an oversized summary must be flagged with its length, got:\n{out}"
+        assert "high-level" in out, "the nudge must explain what a good summary looks like"
+    finally:
+        os.chdir(old_cwd)
+
+
 def _test_activity_tail(root: Path) -> None:
     # A verbose logger (long summary, long file list) must not be able to let 5
     # entries burn thousands of chars and starve the map of its share of the budget.
@@ -1371,6 +1399,7 @@ def run_self_test() -> int:
         _build_fixture(root)
         _test_symbols_and_graph(root)
         _test_budget_is_honest(root)
+        _test_log_summary_length(root)
         _test_activity_tail(root)
         _test_focus(root)
         _test_misc(root)
