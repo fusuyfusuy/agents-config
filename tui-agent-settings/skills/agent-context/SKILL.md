@@ -72,19 +72,31 @@ agent-ctx init
 
 ## 3. Persistent Memory & Architectural Decisions
 
-- **`.agents/memory.md`**: Update this file when discovering non-obvious domain rules, active epic milestones, or subtle edge-case gotchas.
-- **`.agents/decisions.md`**: Record new Architecture Decision Records (ADRs) explaining *Context*, *Decision*, and *Consequences* when introducing new architectural patterns.
+- **`.agents/memory.md`**: Update when discovering non-obvious domain rules, active epic milestones, or subtle edge-case gotchas.
+- **`.agents/decisions.md`**: Record new ADRs (*Context*, *Decision*, *Consequences*) when introducing new architectural patterns.
+
+### Writing style: caveman
+
+`memory.md`, `decisions.md`, and `log --summary` get scanned fast at session start — write them caveman-style, not prose.
+
+Drop: articles (a/an/the), filler (just/really/basically/actually/simply), hedging ("it might be worth", "you could consider"), pleasantries, connective fluff (however/furthermore/additionally). Fragments OK. Short synonym over long phrase (big not extensive, fix not "implement a solution for"). Merge bullets saying the same thing twice; one example, not three.
+
+Keep exact, never touch: code, inline code, file paths, commands, URLs, technical terms, numbers/versions, error strings. Never drop not/never/no/only — flips meaning, costs more than it saves. Never invent abbreviations (cfg/impl/req) to look terse — same token count, less clear; full word wins.
+
+Applies to `.agents/memory.md`, `.agents/decisions.md`, `agent-ctx log --summary`. Not README/CLAUDE.md prose or chat replies — those stay full sentences.
 
 ## 4. Log Task Activity & Telemetry
 
-When finishing a task or major milestone, log the action with its touched files and summary:
+When finishing a task or major milestone, log a **high-level overview** — what changed and why it matters, not a step-by-step of how you did it. One line, caveman style (above), similar in scope to a git commit subject line:
 
 ```bash
 agent-ctx log \
   --action "refactor-auth" \
-  --summary "Migrated token validation to unified middleware and added unit test check" \
+  --summary "Unified token validation into one middleware, stop 3 endpoints re-implementing it" \
   --files "auth.py,middleware.py,test_auth.py"
 ```
+
+`dump`'s Recent Activity elides any summary past ~160 chars (see Budget above), and `agent-ctx log` warns if yours runs long — that's the signal you drifted into implementation-detail prose. Save the mechanism, the file-by-file breakdown, and the "how" for the commit message; `Recent Activity` exists so an agent can scan "what happened lately" in one pass at session start, not replay the session.
 
 To inspect recent activities across sessions:
 

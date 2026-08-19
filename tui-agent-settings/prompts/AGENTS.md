@@ -18,7 +18,7 @@
 ## Project Context & Memory Protocol
 
 - **Session Start / Warmup**: Before performing multi-file search or directory crawls, check `.agents/repo_map.md` or run `agent-ctx dump` to read existing memory, architectural decisions, and the symbol map.
-- **Task Completion**: After completing non-trivial tasks or architectural decisions, log activity with `agent-ctx log --action ... --summary ... --files ...` and update `.agents/memory.md` or `.agents/decisions.md` with new invariants or gotchas.
+- **Task Completion**: After non-trivial tasks or architecture decisions, log with `agent-ctx log --action ... --summary ... --files ...` — `--summary` is one high-level line, what changed + why, caveman style (drop filler/hedging, keep exact terms, see `agent-context` skill); save implementation detail for the commit message. Update `.agents/memory.md`/`.agents/decisions.md` with new invariants or gotchas, same style.
 
 
 ## Ponytail — Lazy Senior Dev Mode
