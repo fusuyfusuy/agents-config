@@ -25,7 +25,13 @@ CLAUDE_CACHE_FILE = os.path.join(CACHE_DIR, "claude.json")
 OUTPUT_STATUS_JSON = os.path.join(CACHE_DIR, "status.json")
 OUTPUT_AGY_TXT = os.path.join(CACHE_DIR, "agy.txt")
 OUTPUT_CLAUDE_TXT = os.path.join(CACHE_DIR, "claude.txt")
+OUTPUT_PI_TXT = os.path.join(CACHE_DIR, "pi.txt")
 OUTPUT_COMBINED_TXT = os.path.join(CACHE_DIR, "combined.txt")
+
+PI_SESSIONS_DIR = os.environ.get(
+    "PI_SESSIONS_DIR",
+    os.path.expanduser("~/.pi/agent/sessions"),
+)
 
 USER_STATUS_PATH = "/exa.language_server_pb.LanguageServerService/GetUserStatus"
 
@@ -262,6 +268,166 @@ def load_claude_quota() -> dict:
         return {}
 
 
+def reset_epoch(entry: dict) -> float | None:
+    reset_time = entry.get("reset_time")
+    if not reset_time:
+        return None
+    try:
+        return datetime.fromisoformat(reset_time.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def read_json_file(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def normalize_model_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+
+def find_model_by_name(models: dict, model_name: str) -> dict:
+    if not model_name or not models:
+        return {}
+    wanted = normalize_model_name(model_name)
+    for key, value in models.items():
+        key_norm = normalize_model_name(key)
+        if key_norm and (key_norm in wanted or wanted in key_norm):
+            return value
+        label_norm = normalize_model_name(value.get("name", ""))
+        if label_norm and (label_norm in wanted or wanted in label_norm):
+            return value
+    return {}
+
+
+def select_gating_quota(models: dict, active_model_name: str = "") -> dict:
+    """Return the active gating quota constraint:
+    1. If an active model is specified and matches, return its quota.
+    2. Otherwise, return the most constrained model: lowest remaining percentage
+       first, with ties broken by soonest reset time.
+    """
+    if active_model_name:
+        matched = find_model_by_name(models, active_model_name)
+        if matched:
+            return matched
+
+    candidates = list(models.values())
+    if not candidates:
+        return {}
+
+    return min(
+        candidates,
+        key=lambda m: (
+            float(m.get("remaining_percentage", 100.0)),
+            reset_epoch(m) if reset_epoch(m) is not None else float("inf"),
+        ),
+    )
+
+
+def select_claude_gating_quota(claude_data: dict) -> dict | None:
+    if not claude_data:
+        return None
+
+    five_h_used = claude_data.get("five_hour_used_pct")
+    seven_d_used = claude_data.get("seven_day_used_pct")
+    five_h_reset = claude_data.get("five_hour_resets_at")
+    seven_d_reset = claude_data.get("seven_day_resets_at")
+
+    five_h_rem = (100.0 - float(five_h_used)) if five_h_used is not None else None
+    seven_d_rem = (100.0 - float(seven_d_used)) if seven_d_used is not None else None
+
+    candidates = []
+    if five_h_rem is not None:
+        candidates.append({
+            "window": "5h",
+            "remaining_pct": five_h_rem,
+            "resets_in": format_epoch_reset(five_h_reset) if five_h_reset else "",
+            "reset_epoch": float(five_h_reset) if five_h_reset else float("inf"),
+        })
+    if seven_d_rem is not None:
+        candidates.append({
+            "window": "7d",
+            "remaining_pct": seven_d_rem,
+            "resets_in": format_epoch_reset(seven_d_reset) if seven_d_reset else "",
+            "reset_epoch": float(seven_d_reset) if seven_d_reset else float("inf"),
+        })
+
+    if not candidates:
+        return None
+
+    gating = min(candidates, key=lambda c: (c["remaining_pct"], c["reset_epoch"]))
+    gating["model"] = claude_data.get("model", "Claude")
+    return gating
+
+
+def entry_cost_total(entry: dict) -> float:
+    """Cost persisted by pi for one session entry (message / compaction / summary).
+
+    Mirrors pi's own getUsageCostBreakdown: assistant messages carry
+    message.usage.cost.total, toolResult messages may too, and compaction /
+    branch_summary entries carry usage.cost.total directly.
+    """
+    etype = entry.get("type")
+    if etype == "message":
+        usage = entry.get("message", {}).get("usage") or {}
+    elif etype in ("compaction", "branch_summary"):
+        usage = entry.get("usage") or {}
+    else:
+        return 0.0
+    cost = usage.get("cost") or {}
+    try:
+        return float(cost.get("total", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def compute_pi_today_spend(sessions_root: str | None = None) -> float:
+    """Total pi spend for the current local calendar day, summed across all
+    session files that were modified today under `sessions_root`.
+
+    Returns 0.0 (never an error) when the sessions dir is missing or empty.
+    """
+    root = sessions_root or PI_SESSIONS_DIR
+    if not os.path.isdir(root):
+        return 0.0
+
+    now = datetime.now()
+    start_of_day = datetime(now.year, now.month, now.day).timestamp()
+
+    total = 0.0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            if not name.endswith(".jsonl"):
+                continue
+            path = os.path.join(dirpath, name)
+            # Files split per session; a session touched today lives in the
+            # file touched today. Old files are skipped without parsing.
+            if os.path.getmtime(path) < start_of_day:
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            total += entry_cost_total(json.loads(line))
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            continue
+            except OSError:
+                continue
+    return total
+
+
+def format_pi_spend(cost: float) -> str:
+    return f"${cost:.2f}"
+
+
 def get_color_tag(pct: float, high: str = "#[fg=colour120,bold]", med: str = "#[fg=colour221,bold]", low: str = "#[fg=colour203,bold]") -> str:
     if pct >= 50.0:
         return high
@@ -278,49 +444,32 @@ def main():
     if not agy_data:
         agy_data = load_cached_agy_quota()
 
-    # Determine primary model / quota for AGY
+    # Determine active gating quota for AGY
     agy_models = agy_data.get("models", {})
     agy_summary = None
     if agy_models:
-        # Prioritize key active models if present, else highest remaining or first
-        preferred = ["gemini 2.5 pro", "claude 3.7 sonnet", "claude 3.5 sonnet", "gemini 2.0 flash", "flash"]
-        selected_model = None
-        for pref in preferred:
-            for k, v in agy_models.items():
-                if pref in k:
-                    selected_model = v
-                    break
-            if selected_model:
-                break
-        if not selected_model:
-            selected_model = next(iter(agy_models.values()))
+        active_model = ""
+        if os.path.exists(STATUS_STATE_FILE):
+            state = read_json_file(STATUS_STATE_FILE)
+            active_model = state.get("model", "")
 
-        pct = float(selected_model.get("remaining_percentage", 0.0))
-        refreshes_in = selected_model.get("refreshes_in") or format_reset_time(selected_model.get("reset_time", ""))
-        agy_summary = {
-            "name": selected_model.get("name", "AGY"),
-            "remaining_pct": pct,
-            "refreshes_in": refreshes_in,
-        }
+        selected_model = select_gating_quota(agy_models, active_model)
+        if selected_model:
+            pct = float(selected_model.get("remaining_percentage", 0.0))
+            refreshes_in = selected_model.get("refreshes_in") or format_reset_time(selected_model.get("reset_time", ""))
+            agy_summary = {
+                "name": selected_model.get("name", "AGY"),
+                "remaining_pct": pct,
+                "refreshes_in": refreshes_in,
+            }
 
     # 2. Fetch Claude quota
     claude_data = load_claude_quota()
-    claude_summary = None
-    if claude_data:
-        five_h_used = claude_data.get("five_hour_used_pct")
-        seven_d_used = claude_data.get("seven_day_used_pct")
-        five_h_reset = claude_data.get("five_hour_resets_at")
-        seven_d_reset = claude_data.get("seven_day_resets_at")
+    claude_summary = select_claude_gating_quota(claude_data)
 
-        claude_summary = {
-            "model": claude_data.get("model", "Claude"),
-            "five_hour_used_pct": five_h_used,
-            "five_hour_remaining_pct": (100.0 - float(five_h_used)) if five_h_used is not None else None,
-            "five_hour_resets_in": format_epoch_reset(five_h_reset) if five_h_reset else "",
-            "seven_day_used_pct": seven_d_used,
-            "seven_day_remaining_pct": (100.0 - float(seven_d_used)) if seven_d_used is not None else None,
-            "seven_day_resets_in": format_epoch_reset(seven_d_reset) if seven_d_reset else "",
-        }
+    # 2b. Pi today's spend (summed from persisted session costs)
+    pi_cost = compute_pi_today_spend()
+    pi_txt = f"#[fg=colour214]PI {format_pi_spend(pi_cost)}#[default]"
 
     # 3. Build tmux formatted strings
     # AGY Segment
@@ -333,11 +482,11 @@ def main():
     else:
         agy_txt = "#[fg=colour244]AGY --#[default]"
 
-    # Claude Segment (current 5h quota + countdown only, no 7d weekly)
-    if claude_summary and claude_summary["five_hour_used_pct"] is not None:
-        rem = claude_summary["five_hour_remaining_pct"]
+    # Claude Segment (active gating constraint)
+    if claude_summary and claude_summary.get("remaining_pct") is not None:
+        rem = claude_summary["remaining_pct"]
         col = get_color_tag(rem)
-        rst = claude_summary["five_hour_resets_in"]
+        rst = claude_summary.get("resets_in", "")
         rst_str = f" {rst}" if rst else ""
         claude_txt = f"{col}CC {rem:.0f}%{rst_str}#[default]"
     else:
@@ -347,8 +496,9 @@ def main():
     combined_parts = []
     if agy_summary:
         combined_parts.append(agy_txt)
-    if claude_summary and claude_summary["five_hour_used_pct"] is not None:
+    if claude_summary and claude_summary.get("remaining_pct") is not None:
         combined_parts.append(claude_txt)
+    combined_parts.append(pi_txt)
 
     if combined_parts:
         combined_txt = " #[fg=colour240]│#[default] ".join(combined_parts)
@@ -359,6 +509,7 @@ def main():
     for target_file, content in [
         (OUTPUT_AGY_TXT, agy_txt),
         (OUTPUT_CLAUDE_TXT, claude_txt),
+        (OUTPUT_PI_TXT, pi_txt),
         (OUTPUT_COMBINED_TXT, combined_txt),
     ]:
         tmp = f"{target_file}.tmp"
@@ -371,6 +522,7 @@ def main():
         "timestamp": time.time(),
         "antigravity": agy_summary,
         "claude": claude_summary,
+        "pi": {"today_cost": pi_cost, "display": pi_txt},
     }
     tmp_json = f"{OUTPUT_STATUS_JSON}.tmp"
     with open(tmp_json, "w", encoding="utf-8") as f:

@@ -18,6 +18,11 @@ agent_quotas_interpolation=(
   "#($CURRENT_DIR/scripts/render_status.sh combined)"
 )
 
+pi_spend_interpolation=(
+  "\#{pi_spend}"
+  "#($CURRENT_DIR/scripts/render_status.sh pi)"
+)
+
 update_tmux_option() {
   local option="$1"
   local option_value
@@ -27,6 +32,7 @@ update_tmux_option() {
     new_option_value="${new_option_value//${agy_quota_interpolation[0]}/${agy_quota_interpolation[1]}}"
     new_option_value="${new_option_value//${claude_quota_interpolation[0]}/${claude_quota_interpolation[1]}}"
     new_option_value="${new_option_value//${agent_quotas_interpolation[0]}/${agent_quotas_interpolation[1]}}"
+    new_option_value="${new_option_value//${pi_spend_interpolation[0]}/${pi_spend_interpolation[1]}}"
     set_tmux_option "$option" "$new_option_value"
   fi
 }

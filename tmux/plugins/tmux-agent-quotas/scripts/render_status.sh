@@ -15,9 +15,13 @@ case "$TARGET" in
     CACHE_FILE="$CACHE_DIR/claude.txt"
     DEFAULT_TEXT="#[fg=colour244]CC --#[default]"
     ;;
+  pi)
+    CACHE_FILE="$CACHE_DIR/pi.txt"
+    DEFAULT_TEXT="#[fg=colour244]PI --#[default]"
+    ;;
   *)
     CACHE_FILE="$CACHE_DIR/combined.txt"
-    DEFAULT_TEXT="#[fg=colour244]AGY -- │ CC --#[default]"
+    DEFAULT_TEXT="#[fg=colour244]AGY -- │ CC -- │ PI --#[default]"
     ;;
 esac
 

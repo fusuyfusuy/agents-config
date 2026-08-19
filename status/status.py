@@ -125,6 +125,53 @@ def shorten_model_name(name: str) -> str:
     return clean + thinking_suffix
 
 
+def reset_epoch(entry: dict):
+    reset_time = entry.get("reset_time")
+    if not reset_time:
+        return None
+    try:
+        return datetime.fromisoformat(reset_time.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def find_model_by_name(models: dict, model_name: str) -> dict:
+    if not model_name or not models:
+        return {}
+    wanted = normalize_model_name(model_name)
+    if wanted in models:
+        return models[wanted]
+    for key, value in models.items():
+        key_norm = normalize_model_name(key)
+        if key_norm and (key_norm in wanted or wanted in key_norm):
+            return value
+    return {}
+
+
+def select_gating_quota(models: dict, active_model_name: str = "") -> dict:
+    """Return the active gating quota constraint:
+    1. If an active model is specified and present in models, return its quota.
+    2. Otherwise, return the most constrained model: lowest remaining percentage
+       first, with ties broken by soonest reset time.
+    """
+    if active_model_name:
+        matched = find_model_by_name(models, active_model_name)
+        if matched:
+            return matched
+
+    candidates = list(models.values())
+    if not candidates:
+        return {}
+
+    return min(
+        candidates,
+        key=lambda m: (
+            float(m.get("remaining_percentage", 100.0)),
+            reset_epoch(m) if reset_epoch(m) is not None else float("inf"),
+        ),
+    )
+
+
 def quota_color(pct: float) -> str:
     if pct >= 50:
         return PURPLE
@@ -462,8 +509,8 @@ def refresh_quota_if_needed(data: dict) -> dict:
     return cache
 
 
-def load_quota_for_model(model_name: str, data: dict) -> dict:
-    """Read the latest /usage cache and return the entry for the active model."""
+def load_quota_for_model(data: dict) -> dict:
+    """Read the latest quota cache and return the active gating window."""
     cache = refresh_quota_if_needed(data)
     if not cache:
         return {}
@@ -477,18 +524,16 @@ def load_quota_for_model(model_name: str, data: dict) -> dict:
         return {"stale": True, "reason": "age"}
 
     models = cache.get("models", {})
-    if not isinstance(models, dict):
+    if not isinstance(models, dict) or not models:
         return {}
 
-    wanted = normalize_model_name(model_name)
-    if wanted in models:
-        return models[wanted]
+    model_info = data.get("model", {})
+    if isinstance(model_info, dict):
+        active_model = model_info.get("display_name") or model_info.get("id") or ""
+    else:
+        active_model = str(model_info or "")
 
-    for key, value in models.items():
-        key_norm = normalize_model_name(key)
-        if key_norm and (key_norm in wanted or wanted in key_norm):
-            return value
-    return {}
+    return select_gating_quota(models, active_model)
 
 
 def get_tip(force_rotate=False) -> str:
@@ -561,15 +606,15 @@ def render(data: dict) -> str:
         f"  {WHITE}{format_tokens(total_t)} tok{RESET}"
     )
 
-    # 5. Quota from the cached /usage output for the active model
-    quota = load_quota_for_model(raw_name, data)
+    # 5. Quota from the cached /usage output — active gating constraint
+    quota = load_quota_for_model(data)
     if quota.get("stale"):
         reason = quota.get("reason", "stale")
         quota_display = f"{GRAY}qt: sync /usage ({reason}){RESET}"
     elif "remaining_percentage" in quota:
-        quota_pct = float(quota["remaining_percentage"])
+        quota_pct = float(quota.get("remaining_percentage", 0.0))
         qc = quota_color(quota_pct)
-        reset_in = quota.get("refreshes_in") or ""
+        reset_in = quota.get("refreshes_in") or format_reset_time(quota.get("reset_time", ""))
         reset_display = f"{GRAY} · rst {reset_in}{RESET}" if reset_in else ""
         quota_display = f"{qc}qt {quota_pct:.0f}%{RESET}{reset_display}"
     else:
@@ -625,6 +670,16 @@ def main():
             if r:
                 chunk = sys.stdin.read(1)
                 if not chunk:
+                    # Stdin closed; process remaining buffer if any
+                    stripped = buffer.lstrip()
+                    if stripped and not last_data:
+                        try:
+                            data, _ = decoder.raw_decode(stripped)
+                            if isinstance(data, dict):
+                                write_status_state(data)
+                                print(render(data), flush=True)
+                        except Exception:
+                            pass
                     break
                 buffer += chunk
 
@@ -637,7 +692,7 @@ def main():
                         try:
                             data, idx = decoder.raw_decode(stripped)
                             buffer = stripped[idx:]
-                            if isinstance(data, dict) and "model" in data:
+                            if isinstance(data, dict):
                                 write_status_state(data)
                                 last_data = data
                                 print(render(last_data), flush=True)
@@ -651,7 +706,6 @@ def main():
                 # Check if 3 seconds have passed since we last got a new tip
                 # get_tip() handles the 3-second cache logic internally
                 current_tip = get_tip()
-                # To actually redraw on idle state, we force print if 3 seconds passed
                 try:
                     with open(TIP_CACHE_FILE, "r") as f:
                         cache = json.load(f)
@@ -659,8 +713,6 @@ def main():
                 except Exception:
                     ts = now
                 
-                # If time since last tip generation is >= 3, get_tip() will generate a new one
-                # If time is up, we should render and print.
                 if now - ts >= TIP_MIN_SECONDS:
                     print(render(last_data), flush=True)
 
