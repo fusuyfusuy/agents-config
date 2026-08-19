@@ -8,11 +8,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # --------------------------------------------------------------------------
 
 detect_agents() {
-    HAVE_CLAUDE=false; HAVE_AGY=false; HAVE_PI=false
+    HAVE_CLAUDE=false; HAVE_AGY=false; HAVE_PI=false; HAVE_OPENCODE=false
 
     if command -v claude >/dev/null 2>&1 || [ -d "$HOME/.claude" ]; then HAVE_CLAUDE=true; fi
     if command -v agy    >/dev/null 2>&1 || [ -d "$HOME/.gemini" ]; then HAVE_AGY=true; fi
     if command -v pi     >/dev/null 2>&1 || [ -d "$HOME/.pi" ];     then HAVE_PI=true; fi
+    if command -v opencode >/dev/null 2>&1 || [ -d "$HOME/.config/opencode" ]; then HAVE_OPENCODE=true; fi
 }
 
 state() { [ "$1" = true ] && echo "installed" || echo "not found"; }
@@ -23,13 +24,14 @@ resolve_selection() {
     local sel
     sel=$(echo "${1:-all}" | tr '[:upper:]' '[:lower:]')
 
-    INSTALL_CLAUDE=false; INSTALL_AGY=false; INSTALL_PI=false
+    INSTALL_CLAUDE=false; INSTALL_AGY=false; INSTALL_PI=false; INSTALL_OPENCODE=false
     case "$sel" in
-        all)  INSTALL_CLAUDE=$HAVE_CLAUDE; INSTALL_AGY=$HAVE_AGY; INSTALL_PI=$HAVE_PI ;;
+        all)  INSTALL_CLAUDE=$HAVE_CLAUDE; INSTALL_AGY=$HAVE_AGY; INSTALL_PI=$HAVE_PI; INSTALL_OPENCODE=$HAVE_OPENCODE ;;
         none) : ;;
         *)    [[ "$sel" == *c* ]] && INSTALL_CLAUDE=true
               [[ "$sel" == *a* ]] && INSTALL_AGY=true
-              [[ "$sel" == *p* ]] && INSTALL_PI=true ;;
+              [[ "$sel" == *p* ]] && INSTALL_PI=true
+              [[ "$sel" == *o* ]] && INSTALL_OPENCODE=true ;;
     esac
 }
 
@@ -38,6 +40,7 @@ choose_agents() {
     printf "    [c] Claude Code              : %s\n" "$(state "$HAVE_CLAUDE")"
     printf "    [a] AGY (Antigravity/Gemini)  : %s\n" "$(state "$HAVE_AGY")"
     printf "    [p] pi                       : %s\n" "$(state "$HAVE_PI")"
+    printf "    [o] opencode                 : %s\n" "$(state "$HAVE_OPENCODE")"
     echo
 
     # Non-interactive override for automation/CI: AGENTS='cap' | 'all' | 'none' | letters.
@@ -55,7 +58,7 @@ choose_agents() {
     fi
 
     echo "Which agents should I configure here?"
-    echo "  Enter letters to select (e.g. 'cap'), 'all', 'none', or leave blank for all detected:"
+    echo "  Enter letters to select (e.g. 'capo'), 'all', 'none', or leave blank for all detected:"
     read -r sel
     resolve_selection "${sel:-all}"
 }
@@ -129,17 +132,17 @@ link_file() {
 }
 
 # Fan out the shared skills (canonical source: tui-agent-settings/skills) into
-# an agent's global skill directory. Same source, three targets.
-# Only SKILL.md is linked — a skill's backing script (e.g. agent-ctx, agent-kb/)
-# lives alongside it for co-location but is installed once on PATH by
-# install_shared, not fanned out file-by-file into every agent's skills dir.
+# an agent's global skill directory. Same source, several targets. Each skill is
+# symlinked as a whole directory so it tracks the repo and never drifts; a
+# skill's backing script (e.g. agent-ctx, agent-kb/) rides along inside the
+# symlink and is additionally installed once on PATH by install_shared.
 link_skills() {
     local dest_root="$1"
     mkdir -p "$dest_root"
     if [ -d "$SCRIPT_DIR/tui-agent-settings/skills" ]; then
-        find "$SCRIPT_DIR/tui-agent-settings/skills" -name "SKILL.md" | sort | while read -r skill_file; do
-            rel_path="${skill_file#$SCRIPT_DIR/tui-agent-settings/skills/}"
-            link_file "$skill_file" "$dest_root/$rel_path"
+        for skill_dir in "$SCRIPT_DIR"/tui-agent-settings/skills/*/; do
+            [ -f "${skill_dir}SKILL.md" ] || continue
+            link_file "$skill_dir" "$dest_root/$(basename "$skill_dir")"
         done
     fi
 }
@@ -155,12 +158,14 @@ install_shared() {
              "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/status.py" \
              "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/statusline.sh" \
              "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/agy-quota-cache.py" \
-             "$SCRIPT_DIR/tui-agent-settings/claude/statusline-command.sh"
+             "$SCRIPT_DIR/tui-agent-settings/claude/statusline-command.sh" \
+             "$SCRIPT_DIR/tui-agent-settings/usage/ocgo.py"
 
     mkdir -p "$HOME/.local/bin"
 
     # CLI Binaries
     link_file "$SCRIPT_DIR/tui-agent-settings/skills/agent-context/agent-ctx" "$HOME/.local/bin/agent-ctx"
+    link_file "$SCRIPT_DIR/tui-agent-settings/usage/ocgo.py" "$HOME/.local/bin/ocgo"
 
     # agent-kb: build its venv, then symlink the installed console script
     AGENT_KB_DIR="$SCRIPT_DIR/tui-agent-settings/skills/agent-error-kb/agent-kb"
@@ -258,6 +263,36 @@ install_pi() {
     link_skills "$HOME/.pi/agent/skills"
 }
 
+install_opencode() {
+    echo "==> Configuring opencode..."
+    local cfg_dir="$HOME/.config/opencode"
+    local cfg="$cfg_dir/opencode.jsonc"
+    mkdir -p "$cfg_dir"
+
+    # Preserve any user-installed plugins; default to the suite's known pair.
+    local plugins='["opencode-gemini-auth@latest", "opencode-statusline@latest"]'
+    if [ -f "$cfg" ]; then
+        local existing
+        existing=$(grep -o '"plugin"[[:space:]]*:[[:space:]]*\[[^]]*\]' "$cfg" || true)
+        [ -n "$existing" ] && plugins=$(printf '%s' "$existing" | sed 's/"plugin"[[:space:]]*:[[:space:]]*//')
+    fi
+
+    cat > "$cfg" <<EOF
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "plugin": $plugins,
+  "instructions": [
+    "$SCRIPT_DIR/tui-agent-settings/prompts/AGENTS.md",
+    "$SCRIPT_DIR/tui-agent-settings/prompts/PROCESSES.md"
+  ]
+}
+EOF
+    echo "  [WRITE] Wrote $cfg (instructions -> AGENTS.md, PROCESSES.md)"
+
+    # opencode discovers skills from ~/.claude/skills; fan them out there.
+    link_skills "$HOME/.claude/skills"
+}
+
 # --------------------------------------------------------------------------
 # main
 # --------------------------------------------------------------------------
@@ -270,6 +305,7 @@ install_shared
 if [ "$INSTALL_CLAUDE" = true ]; then install_claude; fi
 if [ "$INSTALL_AGY"    = true ]; then install_agy; fi
 if [ "$INSTALL_PI"     = true ]; then install_pi; fi
+if [ "$INSTALL_OPENCODE" = true ]; then install_opencode; fi
 if [ "$INSTALL_TMUX_STATUSLINE" = true ]; then
     [ "$INSTALL_TMUX_PLUGINS" = false ] && INSTALL_TMUX_PLUGINS=true && \
         echo "==> Statusline requires the plugins; installing them too."

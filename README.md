@@ -35,9 +35,10 @@ Run the setup script to symlink all configurations, skills, binaries, and plugin
     [c] Claude Code              : installed
     [a] AGY (Antigravity/Gemini)  : installed
     [p] pi                       : installed
+    [o] opencode                 : installed
 
 Which agents should I configure here?
-  Enter letters to select (e.g. 'cap'), 'all', 'none', or leave blank for all detected:
+  Enter letters to select (e.g. 'capo'), 'all', 'none', or leave blank for all detected:
 
 Optional tmux integration:
   [p] plugins    : symlink tmux-agent-quotas + tmux-agent-alert into ~/.tmux/plugins
@@ -49,7 +50,7 @@ Optional tmux integration:
 - The tmux prompt asks separately about **plugins** (`p`) and **statusline** (`s`). Choosing the statusline auto-installs the plugins it renders against; `none`/blank-for-all behave the same as for agents.
 - Non-interactive: with `AGENTS` you override the agent prompt; with `TMUX_SETUP=ps|all|none` you override the tmux prompt. Without a TTY (piped/CI) both defaults install everything detected and never hang on `read`.
 - The statusline block is appended to `~/.tmux.conf` behind a marker line, so re-running setup is idempotent and existing config is never rewritten.
-- Symlinks files under `~/.claude`, `~/.gemini`, `~/.antigravity`, `~/.pi/agent` (pi global instructions + skills), `~/.local/bin`, and `~/.tmux/plugins`.
+- Symlinks files under `~/.claude`, `~/.gemini`, `~/.antigravity`, `~/.pi/agent` (pi global instructions + skills), `~/.config/opencode` (opencode `instructions` -> `AGENTS.md` + `PROCESSES.md`), `~/.local/bin`, and `~/.tmux/plugins`.
 - If an existing target file is not already symlinked, it is backed up to `<target>.bak.<timestamp>`.
 - Builds the Python venv for `agent-kb` via `uv` or `python3 -m venv`.
 - Safe to re-run at any time.
@@ -58,7 +59,7 @@ Optional tmux integration:
 
 ## Philosophy & Operating Principles
 
-All agents running under this configuration adhere to [`AGENTS.md`](tui-agent-settings/prompts/AGENTS.md):
+All agents running under this configuration adhere to [`AGENTS.md`](tui-agent-settings/prompts/AGENTS.md) — Claude Code (via `~/.claude/CLAUDE.md`), AGY/Gemini (via `~/.gemini/AGENTS.md`), pi (via `~/.pi/agent/AGENTS.md`), and opencode (via `instructions` in `~/.config/opencode/opencode.jsonc`).
 
 1. **No backward-compatibility shims**: Remove obsolete paths cleanly instead of layering migrations or fallbacks.
 2. **Grow in layers**: Build the smallest version that works end-to-end first, then add capabilities incrementally.
@@ -179,3 +180,27 @@ The skills (`agent-context`, `agent-error-kb`, `agent-processes`, `code-summary`
 
 - **Antigravity ([`tui-agent-settings/antigravity-cli/statusline.sh`](tui-agent-settings/antigravity-cli/statusline.sh))**: Renders agent state (`READY`, `THINKING`, `WORKING`, `TOOL`), active git branch, model name, fine-grained Unicode context bar, subagent count, task count, and sandbox status.
 - **Claude Code ([`tui-agent-settings/claude/statusline-command.sh`](tui-agent-settings/claude/statusline-command.sh))**: Displays workspace path, git branch/dirty state, model, context usage %, and rolling rate limit resets.
+
+### 7. `ocgo` — OpenCode Go Quota & Usage Report
+
+[`tui-agent-settings/usage/ocgo.py`](tui-agent-settings/usage/ocgo.py) shows your OpenCode Go subscription quota windows plus a breakdown of what actually consumed them. Symlinked to `~/.local/bin/ocgo` by `setup.sh`.
+
+```bash
+# Color-coded tables: quota windows (live default)
+ocgo
+
+# Show weekly's who-ate-it table instead of the 5h rolling
+ocgo --window weekly
+
+# All windows, full per-session tables (long)
+ocgo --detail
+
+# Plain text for piping/less
+ocgo --no-color | less
+```
+
+**Capabilities:**
+- **Live windows**: 5h rolling / weekly / monthly used-% and reset countdown from the official `/zen/go/v1/usage` endpoint, color-coded (green/yellow/red by remaining) with progress bars; key from `OPENCODE_GO_API_KEY` or `~/.pi/agent/auth.json`.
+- **Formatted tables**: aligned color tables (bold-cyan headers, top consumer bolded). Default shows the **rolling** (active gate) window's top models + top projects, capped to one screen; `--window` picks another window, `--detail` expands to all windows and full per-session tables.
+- **Who ate it**: aggregates the local `opencode.db`, restricted to the paid `opencode-go` provider, per window (by model, by session, token-type split, cost). Reuses `collect_agent_usage.py`'s message parser.
+- Window bounds track the API's `resetsAt` (weekly −7d, monthly −1 calendar month), so weekly/monthly buckets match what the quota measures rather than an arbitrary trailing range.
