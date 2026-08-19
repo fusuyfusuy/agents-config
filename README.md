@@ -8,15 +8,14 @@ A unified configuration and tooling suite for running AI coding agents (Claude C
 
 | Path | Description |
 | :--- | :--- |
-| [`AGENTS.md`](AGENTS.md) | Core operating rules: subagent management protocol, project memory protocol, and "Ponytail" lazy-dev mode. Symlinked to `~/.gemini/AGENTS.md` and `~/.claude/CLAUDE.md`. |
-| [`PROCESSES.md`](PROCESSES.md) | Concrete how-to recipes backing `AGENTS.md` (worktree isolation, error KB workflow, memory lifecycle). |
-| [`bin/agent-ctx`](bin/agent-ctx) | Zero-daemon, stdlib-only CLI for AST-derived ranked symbol maps, project memory, and activity logging. |
-| [`bin/agent-kb/`](bin/agent-kb/) | Zero-daemon SQLite-backed error knowledge base CLI (`agent-kb`) with exact fingerprinting and token similarity search. |
-| [`tmux/plugins/tmux-agent-quotas/`](tmux/plugins/tmux-agent-quotas/) | Tmux plugin displaying live Antigravity and Claude Code subscription quotas in the status bar. |
-| [`tmux/plugins/tmux-agent-alert/`](tmux/plugins/tmux-agent-alert/) | Tmux plugin & hooks alerting via Mosh terminal bell, status flash, statusline badge, and `<prefix> A` focus jump when agents wait for input. |
-| [`status/`](status/) | Statusline scripts and live quota monitors for Antigravity / Gemini CLI. |
-| [`claude/`](claude/) | Claude Code settings (`settings.json`), statusline script, and agent skills (`agent-context`, `agent-processes`, `agent-error-kb`). |
-| [`antigravity-cli/`, `config/`](antigravity-cli/) | Antigravity / Gemini CLI settings, keybindings, and MCP server configuration. |
+| [`tui-agent-settings/prompts/AGENTS.md`](tui-agent-settings/prompts/AGENTS.md) | Core operating rules: subagent management protocol, project memory protocol, and "Ponytail" lazy-dev mode. Symlinked to `~/.gemini/AGENTS.md` and `~/.claude/CLAUDE.md`. |
+| [`tui-agent-settings/prompts/PROCESSES.md`](tui-agent-settings/prompts/PROCESSES.md) | Concrete how-to recipes backing `AGENTS.md` (worktree isolation, error KB workflow, memory lifecycle). |
+| [`tui-agent-settings/skills/`](tui-agent-settings/skills/) | Shared skill definitions (`agent-context`, `agent-error-kb`, `agent-processes`, `code-summary`), each `SKILL.md` co-located with its backing script where it has one (`agent-context/agent-ctx`, `agent-error-kb/agent-kb/`). Fanned out to all three harnesses by `setup.sh`. |
+| [`tui-agent-settings/tmux/plugins/tmux-agent-quotas/`](tui-agent-settings/tmux/plugins/tmux-agent-quotas/) | Tmux plugin displaying live Antigravity and Claude Code subscription quotas in the status bar. |
+| [`tui-agent-settings/tmux/plugins/tmux-agent-alert/`](tui-agent-settings/tmux/plugins/tmux-agent-alert/) | Tmux plugin & hooks alerting via Mosh terminal bell, status flash, statusline badge, and `<prefix> A` focus jump when agents wait for input. |
+| [`tui-agent-settings/claude/`](tui-agent-settings/claude/) | Claude Code settings (`settings.json`) and statusline script. |
+| [`tui-agent-settings/antigravity-cli/`](tui-agent-settings/antigravity-cli/) | Antigravity / Gemini CLI settings, keybindings, MCP server configuration, and statusline/quota scripts. |
+| [`tui-agent-settings/pi/`](tui-agent-settings/pi/) | pi extensions (`gated-tools.ts`, `compact-tools.ts`), manually synced with `~/.pi/agent/extensions/`. |
 | [`setup.sh`](setup.sh) | Interactive installer: detects installed agents (Claude Code, AGY, pi), asks which to configure, then symlinks each agent's config, skills, binaries, and plugins. |
 
 ---
@@ -59,7 +58,7 @@ Optional tmux integration:
 
 ## Philosophy & Operating Principles
 
-All agents running under this configuration adhere to [`AGENTS.md`](AGENTS.md):
+All agents running under this configuration adhere to [`AGENTS.md`](tui-agent-settings/prompts/AGENTS.md):
 
 1. **No backward-compatibility shims**: Remove obsolete paths cleanly instead of layering migrations or fallbacks.
 2. **Grow in layers**: Build the smallest version that works end-to-end first, then add capabilities incrementally.
@@ -77,7 +76,7 @@ All agents running under this configuration adhere to [`AGENTS.md`](AGENTS.md):
 
 ### 1. `agent-ctx` — Project Context & Symbol Map CLI
 
-[`bin/agent-ctx`](bin/agent-ctx) provides fast, zero-daemon orientation for agents entering any repository:
+[`tui-agent-settings/skills/agent-context/agent-ctx`](tui-agent-settings/skills/agent-context/agent-ctx) provides fast, zero-daemon orientation for agents entering any repository:
 
 ```bash
 # Scaffold .agents/ directory (memory.md, decisions.md, repo_map.md, activity.jsonl)
@@ -108,7 +107,7 @@ agent-ctx --test
 
 ### 2. `agent-kb` — Error Knowledge Base CLI
 
-[`bin/agent-kb/`](bin/agent-kb/) provides an error-signature knowledge base stored in a local SQLite database (`~/.agent-kb/kb.db`):
+[`tui-agent-settings/skills/agent-error-kb/agent-kb/`](tui-agent-settings/skills/agent-error-kb/agent-kb/) provides an error-signature knowledge base stored in a local SQLite database (`~/.agent-kb/kb.db`):
 
 ```bash
 # Search for verified fixes for an error or stack trace
@@ -133,7 +132,7 @@ agent-kb patterns
 
 ### 3. `tmux-agent-quotas` — Subscription Quota Monitor
 
-[`tmux/plugins/tmux-agent-quotas/`](tmux/plugins/tmux-agent-quotas/) monitors live remaining subscription quotas in the tmux status bar.
+[`tui-agent-settings/tmux/plugins/tmux-agent-quotas/`](tui-agent-settings/tmux/plugins/tmux-agent-quotas/) monitors live remaining subscription quotas in the tmux status bar.
 
 Add to `~/.tmux.conf`:
 ```tmux
@@ -150,7 +149,7 @@ run-shell ~/.tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux
 
 ### 4. `tmux-agent-alert` — Mosh & Tmux Alert Dispatcher
 
-[`tmux/plugins/tmux-agent-alert/`](tmux/plugins/tmux-agent-alert/) alerts you when an AI agent or background pane is waiting for user input.
+[`tui-agent-settings/tmux/plugins/tmux-agent-alert/`](tui-agent-settings/tmux/plugins/tmux-agent-alert/) alerts you when an AI agent or background pane is waiting for user input.
 
 Add to `~/.tmux.conf`:
 ```tmux
@@ -171,12 +170,12 @@ run-shell ~/.tmux/plugins/tmux-agent-alert/tmux-agent-alert.tmux
 
 `setup.sh` configures [pi](https://pi.dev) — the terminal coding harness used in this repo — by fanning out the same shared resources it installs for Claude Code and AGY:
 
-- `AGENTS.md` → `~/.pi/agent/AGENTS.md` (pi global instructions)
-- `claude/skills/*` → `~/.pi/agent/skills/` (pi discovers `SKILL.md` directories there)
+- `tui-agent-settings/prompts/AGENTS.md` → `~/.pi/agent/AGENTS.md` (pi global instructions)
+- `tui-agent-settings/skills/*` → `~/.pi/agent/skills/` (pi discovers `SKILL.md` directories there)
 
-The skills (`agent-context`, `agent-error-kb`, `agent-processes`) work unchanged across all three harnesses; pi's model/provider settings live in `~/.pi/agent/settings.json`.
+The skills (`agent-context`, `agent-error-kb`, `agent-processes`, `code-summary`) work unchanged across all three harnesses; pi's model/provider settings live in `~/.pi/agent/settings.json`.
 
 ### 6. Statusline Visualizations
 
-- **Antigravity ([`status/statusline.sh`](status/statusline.sh))**: Renders agent state (`READY`, `THINKING`, `WORKING`, `TOOL`), active git branch, model name, fine-grained Unicode context bar, subagent count, task count, and sandbox status.
-- **Claude Code ([`claude/statusline-command.sh`](claude/statusline-command.sh))**: Displays workspace path, git branch/dirty state, model, context usage %, and rolling rate limit resets.
+- **Antigravity ([`tui-agent-settings/antigravity-cli/statusline.sh`](tui-agent-settings/antigravity-cli/statusline.sh))**: Renders agent state (`READY`, `THINKING`, `WORKING`, `TOOL`), active git branch, model name, fine-grained Unicode context bar, subagent count, task count, and sandbox status.
+- **Claude Code ([`tui-agent-settings/claude/statusline-command.sh`](tui-agent-settings/claude/statusline-command.sh))**: Displays workspace path, git branch/dirty state, model, context usage %, and rolling rate limit resets.

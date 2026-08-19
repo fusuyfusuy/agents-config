@@ -51,5 +51,5 @@ agent-kb seed               # pre-populate with 12 real-world AI agent error rec
 
 ## Notes
 
-- Binary: `~/.local/bin/agent-kb` (already on PATH). It's the console script from `bin/agent-kb/` in this repo (`agents-config`), installed into that project's own `.venv` by `setup.sh`.
+- Binary: `~/.local/bin/agent-kb` (already on PATH). It's the console script from `tui-agent-settings/skills/agent-error-kb/agent-kb/` in this repo (`agents-config`), installed into that project's own `.venv` by `setup.sh`.
 - Shared across tools: this same KB is also used by the Antigravity/Gemini CLI setup on this machine — fixes recorded here are visible there too, and vice versa.

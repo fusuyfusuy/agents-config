@@ -64,14 +64,16 @@ agent-ctx log \
 
 | File / Component | Purpose |
 | :--- | :--- |
-| `AGENTS.md` | Core operating principles, subagent protocol, and Ponytail lazy-dev mode. |
-| `claude/skills/agent-error-kb/SKILL.md` | `agent-kb` lookup/record reference. |
-| `claude/skills/agent-context/SKILL.md` | `agent-ctx` project memory, mapping & activity tracking. |
-| `claude/skills/agent-processes/SKILL.md` | Condensed, triggerable form of this doc. |
-| `bin/agent-ctx` | Zero-daemon CLI for project memory and symbol mapping. |
-| `bin/agent-kb/` | Zero-daemon CLI + SQLite-backed error knowledge base (`agent-kb`). |
+| `prompts/AGENTS.md` | Core operating principles, subagent protocol, and Ponytail lazy-dev mode. |
+| `skills/agent-error-kb/SKILL.md` | `agent-kb` lookup/record reference. |
+| `skills/agent-context/SKILL.md` | `agent-ctx` project memory, mapping & activity tracking. |
+| `skills/agent-processes/SKILL.md` | Condensed, triggerable form of this doc. |
+| `skills/agent-context/agent-ctx` | Zero-daemon CLI for project memory and symbol mapping. |
+| `skills/agent-error-kb/agent-kb/` | Zero-daemon CLI + SQLite-backed error knowledge base (`agent-kb`). |
 | `tmux/plugins/tmux-agent-quotas/` | Live Antigravity + Claude Code quota tracking in tmux status bar. |
 | `tmux/plugins/tmux-agent-alert/` | Tmux alert dispatcher (Mosh bell, status flash, instant focus jump). |
-| `status/status.py`, `status/statusline.sh` | Statusline: quota, branch, context usage, and state alerts. |
+| `antigravity-cli/status.py`, `antigravity-cli/statusline.sh` | Statusline: quota, branch, context usage, and state alerts. |
+
+(All paths above are relative to `tui-agent-settings/`.)
 
 

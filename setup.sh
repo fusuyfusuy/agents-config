@@ -128,14 +128,17 @@ link_file() {
     echo "  [LINK] Created symlink: $dest -> $src"
 }
 
-# Fan out the shared skills (canonical source: claude/skills) into an agent's
-# global skill directory. Same source, three targets.
+# Fan out the shared skills (canonical source: tui-agent-settings/skills) into
+# an agent's global skill directory. Same source, three targets.
+# Only SKILL.md is linked — a skill's backing script (e.g. agent-ctx, agent-kb/)
+# lives alongside it for co-location but is installed once on PATH by
+# install_shared, not fanned out file-by-file into every agent's skills dir.
 link_skills() {
     local dest_root="$1"
     mkdir -p "$dest_root"
-    if [ -d "$SCRIPT_DIR/claude/skills" ]; then
-        find "$SCRIPT_DIR/claude/skills" -type f | sort | while read -r skill_file; do
-            rel_path="${skill_file#$SCRIPT_DIR/claude/skills/}"
+    if [ -d "$SCRIPT_DIR/tui-agent-settings/skills" ]; then
+        find "$SCRIPT_DIR/tui-agent-settings/skills" -name "SKILL.md" | sort | while read -r skill_file; do
+            rel_path="${skill_file#$SCRIPT_DIR/tui-agent-settings/skills/}"
             link_file "$skill_file" "$dest_root/$rel_path"
         done
     fi
@@ -148,19 +151,19 @@ link_skills() {
 install_shared() {
     # Set executable permissions on scripts
     chmod +x "$SCRIPT_DIR/setup.sh" \
-             "$SCRIPT_DIR/bin/agent-ctx" \
-             "$SCRIPT_DIR/status/status.py" \
-             "$SCRIPT_DIR/status/statusline.sh" \
-             "$SCRIPT_DIR/status/agy-quota-cache.py" \
-             "$SCRIPT_DIR/claude/statusline-command.sh"
+             "$SCRIPT_DIR/tui-agent-settings/skills/agent-context/agent-ctx" \
+             "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/status.py" \
+             "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/statusline.sh" \
+             "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/agy-quota-cache.py" \
+             "$SCRIPT_DIR/tui-agent-settings/claude/statusline-command.sh"
 
     mkdir -p "$HOME/.local/bin"
 
     # CLI Binaries
-    link_file "$SCRIPT_DIR/bin/agent-ctx"                   "$HOME/.local/bin/agent-ctx"
+    link_file "$SCRIPT_DIR/tui-agent-settings/skills/agent-context/agent-ctx" "$HOME/.local/bin/agent-ctx"
 
     # agent-kb: build its venv, then symlink the installed console script
-    AGENT_KB_DIR="$SCRIPT_DIR/bin/agent-kb"
+    AGENT_KB_DIR="$SCRIPT_DIR/tui-agent-settings/skills/agent-error-kb/agent-kb"
     if [ -d "$AGENT_KB_DIR" ]; then
         if command -v uv >/dev/null 2>&1; then
             (cd "$AGENT_KB_DIR" && uv sync --quiet)
@@ -174,24 +177,25 @@ install_shared() {
     }
 
 install_tmux() {
-    chmod +x "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/render_status.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/fetch_quotas.py" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas/scripts/helpers.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/tmux-agent-alert.tmux" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/alert_handler.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/render_alerts.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/clear_alert.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/jump_to_alert.sh" \
-             "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert/scripts/helpers.sh"
+    local TMUX_DIR="$SCRIPT_DIR/tui-agent-settings/tmux"
+    chmod +x "$TMUX_DIR/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux" \
+             "$TMUX_DIR/plugins/tmux-agent-quotas/scripts/render_status.sh" \
+             "$TMUX_DIR/plugins/tmux-agent-quotas/scripts/fetch_quotas.py" \
+             "$TMUX_DIR/plugins/tmux-agent-quotas/scripts/helpers.sh" \
+             "$TMUX_DIR/plugins/tmux-agent-alert/tmux-agent-alert.tmux" \
+             "$TMUX_DIR/plugins/tmux-agent-alert/scripts/alert_handler.sh" \
+             "$TMUX_DIR/plugins/tmux-agent-alert/scripts/render_alerts.sh" \
+             "$TMUX_DIR/plugins/tmux-agent-alert/scripts/clear_alert.sh" \
+             "$TMUX_DIR/plugins/tmux-agent-alert/scripts/jump_to_alert.sh" \
+             "$TMUX_DIR/plugins/tmux-agent-alert/scripts/helpers.sh"
 
     mkdir -p "$HOME/.tmux/plugins"
-    if [ -d "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas" ]; then
-        ln -sfn "$SCRIPT_DIR/tmux/plugins/tmux-agent-quotas" "$HOME/.tmux/plugins/tmux-agent-quotas"
+    if [ -d "$TMUX_DIR/plugins/tmux-agent-quotas" ]; then
+        ln -sfn "$TMUX_DIR/plugins/tmux-agent-quotas" "$HOME/.tmux/plugins/tmux-agent-quotas"
         echo "  [LINK] Linked tmux plugin: $HOME/.tmux/plugins/tmux-agent-quotas"
     fi
-    if [ -d "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert" ]; then
-        ln -sfn "$SCRIPT_DIR/tmux/plugins/tmux-agent-alert" "$HOME/.tmux/plugins/tmux-agent-alert"
+    if [ -d "$TMUX_DIR/plugins/tmux-agent-alert" ]; then
+        ln -sfn "$TMUX_DIR/plugins/tmux-agent-alert" "$HOME/.tmux/plugins/tmux-agent-alert"
         echo "  [LINK] Linked tmux plugin: $HOME/.tmux/plugins/tmux-agent-alert"
     fi
 }
@@ -217,27 +221,28 @@ install_tmux_statusline() {
 
 install_claude() {
     echo "==> Configuring Claude Code..."
-    link_file "$SCRIPT_DIR/AGENTS.md"                        "$HOME/.claude/CLAUDE.md"
-    link_file "$SCRIPT_DIR/claude/settings.json"             "$HOME/.claude/settings.json"
-    link_file "$SCRIPT_DIR/claude/statusline-command.sh"     "$HOME/.claude/statusline-command.sh"
+    link_file "$SCRIPT_DIR/tui-agent-settings/prompts/AGENTS.md" "$HOME/.claude/CLAUDE.md"
+    link_file "$SCRIPT_DIR/tui-agent-settings/claude/settings.json"         "$HOME/.claude/settings.json"
+    link_file "$SCRIPT_DIR/tui-agent-settings/claude/statusline-command.sh" "$HOME/.claude/statusline-command.sh"
     link_skills "$HOME/.claude/skills"
 }
 
 install_agy() {
     echo "==> Configuring AGY (Antigravity / Gemini)..."
+    local AGY_DIR="$SCRIPT_DIR/tui-agent-settings/antigravity-cli"
     mkdir -p "$HOME/.gemini/antigravity-cli" "$HOME/.gemini/config/skills" "$HOME/.antigravity"
 
     # Shared rules
-    link_file "$SCRIPT_DIR/AGENTS.md"                        "$HOME/.gemini/AGENTS.md"
+    link_file "$SCRIPT_DIR/tui-agent-settings/prompts/AGENTS.md" "$HOME/.gemini/AGENTS.md"
 
     # Antigravity & Gemini CLI
-    link_file "$SCRIPT_DIR/antigravity-cli/settings.json"    "$HOME/.gemini/antigravity-cli/settings.json"
-    link_file "$SCRIPT_DIR/antigravity-cli/keybindings.json" "$HOME/.gemini/antigravity-cli/keybindings.json"
-    link_file "$SCRIPT_DIR/config/config.json"               "$HOME/.gemini/config/config.json"
-    link_file "$SCRIPT_DIR/config/mcp_config.json"           "$HOME/.gemini/config/mcp_config.json"
-    link_file "$SCRIPT_DIR/status/statusline.sh"            "$HOME/.gemini/antigravity-cli/statusline.sh"
-    link_file "$SCRIPT_DIR/status/status.py"                 "$HOME/.antigravity/status.py"
-    link_file "$SCRIPT_DIR/status/agy-quota-cache.py"        "$HOME/.antigravity/agy-quota-cache.py"
+    link_file "$AGY_DIR/settings.json"      "$HOME/.gemini/antigravity-cli/settings.json"
+    link_file "$AGY_DIR/keybindings.json"   "$HOME/.gemini/antigravity-cli/keybindings.json"
+    link_file "$AGY_DIR/config.json"        "$HOME/.gemini/config/config.json"
+    link_file "$AGY_DIR/mcp_config.json"    "$HOME/.gemini/config/mcp_config.json"
+    link_file "$AGY_DIR/statusline.sh"      "$HOME/.gemini/antigravity-cli/statusline.sh"
+    link_file "$AGY_DIR/status.py"          "$HOME/.antigravity/status.py"
+    link_file "$AGY_DIR/agy-quota-cache.py" "$HOME/.antigravity/agy-quota-cache.py"
 
     link_skills "$HOME/.gemini/config/skills"
 }
@@ -247,7 +252,7 @@ install_pi() {
     mkdir -p "$HOME/.pi/agent/skills"
 
     # Global instructions
-    link_file "$SCRIPT_DIR/AGENTS.md"                        "$HOME/.pi/agent/AGENTS.md"
+    link_file "$SCRIPT_DIR/tui-agent-settings/prompts/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"
 
     # Skills (directories with SKILL.md) are discovered from ~/.pi/agent/skills/
     link_skills "$HOME/.pi/agent/skills"

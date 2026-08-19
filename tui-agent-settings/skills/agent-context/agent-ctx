@@ -59,6 +59,11 @@ DUMP_MAP_MIN_BUDGET = 4000
 # defaults to DUMP_TOTAL_BUDGET because it spends context, not disk.
 BUDGET_PRESETS = {"large": 60_000, "immense": 200_000, "unlimited": UNLIMITED}
 COLLAPSE_RESERVE = 1200  # room for the collapsed-dirs tail, so it stays inside the budget
+# Verbose `log` calls (long summaries, long file lists) can otherwise let 5 activity
+# entries burn thousands of chars and starve the map of its share of DUMP_TOTAL_BUDGET.
+DUMP_ACTIVITY_BUDGET = 1200
+ACTIVITY_SUMMARY_LIMIT = 160
+ACTIVITY_FILES_SHOWN = 4
 MAX_PARSE_BYTES = 500_000
 CHURN_DAYS = 90
 
@@ -1057,13 +1062,40 @@ def cmd_dump(args: argparse.Namespace) -> int:
         lines = act_file.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
         if lines:
             tail.append("## Recent Activity\n")
+            entries: List[str] = []
+            elided = False
             for l in lines[-5:]:
                 try:
                     r = json.loads(l)
-                    ts = r.get("timestamp", "")[:10]
-                    tail.append(f"- **{ts} [{r.get('action')}]**: {r.get('summary')} (files: {', '.join(r.get('files', [])) or 'none'})")
                 except Exception:
-                    pass
+                    continue
+                ts = r.get("timestamp", "")[:10]
+                summary = r.get("summary", "")
+                if len(summary) > ACTIVITY_SUMMARY_LIMIT:
+                    summary = _elide(summary, ACTIVITY_SUMMARY_LIMIT)
+                    elided = True
+                files = r.get("files", [])
+                if len(files) > ACTIVITY_FILES_SHOWN:
+                    files_str = ", ".join(files[:ACTIVITY_FILES_SHOWN]) + f", +{len(files) - ACTIVITY_FILES_SHOWN} more"
+                    elided = True
+                else:
+                    files_str = ", ".join(files) or "none"
+                entries.append(f"- **{ts} [{r.get('action')}]**: {summary} (files: {files_str})")
+
+            # Keep the most recent entries first when the budget can't fit all of them.
+            kept: List[str] = []
+            used = 0
+            for entry in reversed(entries):
+                if used + len(entry) + 1 > DUMP_ACTIVITY_BUDGET:
+                    break
+                kept.append(entry)
+                used += len(entry) + 1
+            dropped = len(entries) - len(kept)
+            kept.reverse()
+            tail.extend(kept)
+            if dropped or elided:
+                tail.append(f"_{len(kept)} of {len(entries)} entries shown"
+                             f"{', some elided' if elided else ''} — read `.agents/activity.jsonl`._")
 
     spent = sum(len(chunk) for chunk in out) + sum(len(chunk) for chunk in tail)
     out.append("## Structure & Symbol Map (live)\n")
@@ -1234,6 +1266,32 @@ def _test_dump_is_live(root: Path) -> None:
     assert stale not in dump, "dump should not echo stale cached repo_map.md content"
 
 
+def _test_activity_tail(root: Path) -> None:
+    # A verbose logger (long summary, long file list) must not be able to let 5
+    # entries burn thousands of chars and starve the map of its share of the budget.
+    act_file = root / ".agents" / "activity.jsonl"
+    lines = []
+    for i in range(5):
+        entry = {
+            "timestamp": f"2026-08-{10 + i:02d}T00:00:00",
+            "action": f"action-{i}",
+            "summary": f"entry-{i} " + ("s" * 400),
+            "files": [f"file{i}_{j}.py" for j in range(10)],
+        }
+        lines.append(json.dumps(entry))
+    act_file.write_text("\n".join(lines) + "\n")
+
+    dump = _dump_to_string(root)
+    tail = dump.split("## Recent Activity")[1]
+
+    assert len(tail) < DUMP_ACTIVITY_BUDGET + 400, \
+        f"the activity tail must stay near its budget regardless of entry verbosity, got {len(tail)} chars"
+    assert "entry-4 " in tail, "the most recent entry must survive trimming"
+    assert "s" * 400 not in tail, "an oversized summary must be elided, not shown in full"
+    assert "+6 more" in tail, "an oversized file list must be truncated with a visible count"
+    assert "entries shown" in tail, "eliding or dropping entries must be announced"
+
+
 def _test_focus(root: Path) -> None:
     content = generate_repo_map(root, focus=["core.py"])
 
@@ -1313,6 +1371,7 @@ def run_self_test() -> int:
         _build_fixture(root)
         _test_symbols_and_graph(root)
         _test_budget_is_honest(root)
+        _test_activity_tail(root)
         _test_focus(root)
         _test_misc(root)
         _test_git_integration(root)

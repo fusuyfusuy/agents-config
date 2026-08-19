@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Self-check for the quota bucket selection logic in fetch_quotas.py and
-status/status.py: run directly with `python3 test_quota_selection.py`.
+antigravity-cli/status.py: run directly with `python3 test_quota_selection.py`.
 """
 import importlib.util
 import os

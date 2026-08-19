@@ -46,6 +46,7 @@ When a budget binds, degradation is by priority and nothing vanishes silently:
 - **Memory** keeps invariants and gotchas ahead of status/epics; an oversized top-priority section is truncated rather than dropped.
 - **Decisions** always list **every ADR title**, expanding bodies newest-first. An ADR marked `**Superseded by**: ...` is kept for history but never expanded, so the file can grow without the snapshot growing with it.
 - **Map** collapses lower-ranked files by directory and reports the counts. Files with no parsed symbols are always summarized this way rather than listed individually, even at an unlimited budget — they are grouped, not dropped.
+- **Recent Activity** (the last `agent-ctx log` entries) is capped separately so a verbose logger can't starve the map's share: long summaries and file lists are elided per-entry, and entries are dropped oldest-first if they still don't fit, with a `_N of M entries shown_` note.
 
 ### Focused Maps for a Task
 
