@@ -101,7 +101,39 @@ def check_claude_gating():
     print("claude_gating: OK")
 
 
+def check_ocgo_gating():
+    fq = load_module("fetch_quotas", os.path.join(HERE, "fetch_quotas.py"))
+
+    # 5h always gates when present, regardless of which window is tighter
+    ocgo_weekly_tighter = {
+        "rolling": {"status": "ok", "percent": 8.0, "resetsAt": "2026-01-02T12:00:00Z"},
+        "weekly": {"status": "ok", "percent": 62.0, "resetsAt": "2026-01-03T12:00:00Z"},
+        "monthly": {"status": "ok", "percent": 40.0, "resetsAt": "2026-01-10T12:00:00Z"},
+    }
+    res = fq.select_ocgo_gating_quota(ocgo_weekly_tighter)
+    assert res["label"] == "5h" and res["remaining_pct"] == 92.0, f"OCGO gating expected 5h 92%, got {res}"
+
+    ocgo_5h_tighter = {
+        "rolling": {"status": "ok", "percent": 90.0, "resetsAt": "2026-01-02T12:00:00Z"},
+        "weekly": {"status": "ok", "percent": 50.0, "resetsAt": "2026-01-03T12:00:00Z"},
+        "monthly": {"status": "ok", "percent": 30.0, "resetsAt": "2026-01-10T12:00:00Z"},
+    }
+    res = fq.select_ocgo_gating_quota(ocgo_5h_tighter)
+    assert res["label"] == "5h" and res["remaining_pct"] == 10.0, f"OCGO gating expected 5h 10%, got {res}"
+
+    # 5h missing -> falls back to weekly, then monthly
+    ocgo_5h_missing = {
+        "weekly": {"status": "ok", "percent": 62.0, "resetsAt": "2026-01-03T12:00:00Z"},
+        "monthly": {"status": "ok", "percent": 30.0, "resetsAt": "2026-01-10T12:00:00Z"},
+    }
+    res = fq.select_ocgo_gating_quota(ocgo_5h_missing)
+    assert res["label"] == "wk" and res["remaining_pct"] == 38.0, f"OCGO gating expected wk fallback 38%, got {res}"
+
+    print("ocgo_gating: OK")
+
+
 check("fetch_quotas", os.path.join(HERE, "fetch_quotas.py"))
 check("status", STATUS_PY)
 check_claude_gating()
+check_ocgo_gating()
 print("all quota selection self-checks passed")

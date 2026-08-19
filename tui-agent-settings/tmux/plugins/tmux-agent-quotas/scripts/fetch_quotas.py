@@ -481,22 +481,22 @@ def fetch_opencode_go_usage() -> dict:
 
 
 def select_ocgo_gating_quota(usage: dict) -> dict | None:
-    """Return the tightest OpenCode Go quota window.
-
-    Prefers the rolling (5h) window as the primary gating constraint.
-    Falls back to weekly or monthly if rolling is missing.
+    """Always surface the 5h rolling window; fall back to weekly, then
+    monthly, only if rolling data is missing. Mirrors
+    select_claude_gating_quota: the 5h bucket is what the user watches, and
+    showing whichever window is numerically tighter makes the display flip
+    to a longer bucket unpredictably.
     """
     if not usage:
         return None
 
-    windows = []
     for key, label in (("rolling", "5h"), ("weekly", "wk"), ("monthly", "mo")):
         w = usage.get(key)
         if not w or w.get("status") != "ok":
             continue
         pct = float(w.get("percent", 0))
         reset_at = w.get("resetsAt", "")
-        windows.append({
+        return {
             "label": label,
             "remaining_pct": 100.0 - pct,
             "resets_in": format_reset_time(reset_at),
@@ -504,13 +504,8 @@ def select_ocgo_gating_quota(usage: dict) -> dict | None:
                 datetime.fromisoformat(reset_at.replace("Z", "+00:00")).timestamp()
                 if reset_at else float("inf")
             ),
-        })
-
-    if not windows:
-        return None
-
-    # Lowest remaining % wins; ties broken by soonest reset
-    return min(windows, key=lambda w: (w["remaining_pct"], w["reset_epoch"]))
+        }
+    return None
 
 
 def get_color_tag(pct: float, high: str = "#[fg=colour120,bold]", med: str = "#[fg=colour221,bold]", low: str = "#[fg=colour203,bold]") -> str:
