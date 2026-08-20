@@ -12,12 +12,15 @@ Stdlib only; reuses collect_agent_usage's parsers and ocgo's display
 helpers. Symlinked to ~/.local/bin/toku by setup.sh.
 """
 import argparse
+import bisect
+import math
+import os
 import shutil
 import sys
 from datetime import datetime, timedelta
 
 import collect_agent_usage as cau
-from ocgo import c, DIM, BOLD, CYAN, GREEN  # ocgo is import-safe (main() guarded)
+from ocgo import c, pad, money, _table, DIM, BOLD, CYAN, GREEN  # ocgo is import-safe (main() guarded)
 
 MAGENTA = "\033[35m"
 
@@ -220,10 +223,214 @@ def monthly_label(d, current_year):
     return lab
 
 
+def parse_records(records, tz=None):
+    """Normalize raw collect records into flat dicts for detail aggregation."""
+    tz = tz or datetime.now().astimezone().tzinfo
+    out = []
+    for r in records:
+        dt = parse_ts_local(r.get("timestamp"), tz)
+        if dt is None:
+            continue
+        toks = r.get("total_tokens") or 0
+        if toks <= 0:
+            continue
+        out.append({
+            "dt": dt,
+            "model": r.get("model") or "unknown",
+            "source": r.get("source") or "?",
+            "project": r.get("project") or "",
+            "tokens": toks,
+            "input": r.get("input_tokens") or 0,
+            "output": r.get("output_tokens") or 0,
+            "crd": r.get("cache_read_tokens") or 0,
+            "cwr": r.get("cache_write_tokens") or 0,
+            "reason": r.get("reasoning_tokens") or 0,
+            "cost": r.get("cost_usd"),
+        })
+    return out
+
+
+def percentile(vals, p):
+    """Nearest-rank percentile over an unsorted list."""
+    vals = sorted(vals)
+    n = len(vals)
+    if n == 0:
+        return None
+    return vals[max(0, min(n - 1, math.ceil(p / 100 * n) - 1))]
+
+
+def log_bins(values, n=12):
+    """Log-spaced histogram over positive values; None when the range is too narrow."""
+    vals = sorted(v for v in values if v > 0)
+    if len(vals) < 2:
+        return None
+    lo, hi = math.log10(vals[0]), math.log10(vals[-1])
+    if hi - lo < 0.4:
+        return None
+    edges = [10 ** (lo + (hi - lo) * i / n) for i in range(n + 1)]
+    counts = [0] * n
+    for v in vals:
+        counts[min(bisect.bisect_right(edges, v) - 1, n - 1)] += 1
+    return edges, counts
+
+
+def hist_chars(counts):
+    m = max(counts) if counts else 0
+    if m <= 0:
+        return [BLOCKS[0]] * len(counts)
+    return [BLOCKS[int(round(c * 8 / m))] for c in counts]
+
+
+def aggregate_models(recs):
+    by = {}
+    for r in recs:
+        m = by.setdefault(r["model"], {"reqs": 0, "tokens": 0, "cost": 0.0, "cost_known": False})
+        m["reqs"] += 1
+        m["tokens"] += r["tokens"]
+        if r["cost"] is not None:
+            m["cost"] += r["cost"]
+            m["cost_known"] = True
+    return by
+
+
+def token_type_totals(recs):
+    keys = ("input", "output", "crd", "cwr", "reason")
+    by_src, totals = {}, {k: 0 for k in keys}
+    for r in recs:
+        s = by_src.setdefault(r["source"], {k: 0 for k in keys})
+        for k in keys:
+            s[k] += r[k]
+            totals[k] += r[k]
+    return by_src, totals
+
+
+def cache_hit(crd, inp):
+    denom = crd + inp
+    return (crd / denom * 100) if denom > 0 else 0.0
+
+
+def rhythm_buckets(recs):
+    hourly, weekday = [0] * 24, [0] * 7
+    for r in recs:
+        hourly[r["dt"].hour] += r["tokens"]
+        weekday[r["dt"].weekday()] += r["tokens"]
+    return hourly, weekday
+
+
+def aggregate_projects(recs):
+    by = {}
+    for r in recs:
+        key = os.path.basename(r["project"]) if r["project"] else "(no project)"
+        p = by.setdefault(key, {"reqs": 0, "tokens": 0})
+        p["reqs"] += 1
+        p["tokens"] += r["tokens"]
+    return by
+
+
+def detail_model_table(by_models, total_tokens, use_color, cap=12):
+    rows = sorted(by_models.items(), key=lambda kv: -kv[1]["tokens"])
+    table_rows = []
+    for name, m in rows[:cap]:
+        # keep the TAIL: the distinguishing part of a provider/model name is
+        # the suffix (version/date), so front-truncate rather than back-truncate
+        name = name if len(name) <= 34 else ".." + name[-(32):]
+        share = m["tokens"] / total_tokens * 100 if total_tokens else 0
+        cost = money(m["cost"]) if m["cost_known"] else "—"
+        table_rows.append((name, fmt(m["reqs"]), fmt(m["tokens"]),
+                           fmt(m["tokens"] / m["reqs"]), f"{share:.1f}%", cost))
+    lines = _table(["MODEL", "REQS", "TOKENS", "AVG/REQ", "SHARE", "COST"],
+                   table_rows, [34, 7, 10, 9, 7, 9], ["l", "r", "r", "r", "r", "r"], use_color)
+    if len(rows) > cap:
+        lines.append(c(f"  ⋯ +{len(rows) - cap} more models", DIM, use_color))
+    return lines
+
+
+def detail_request_stats(recs, use_color):
+    toks = sorted(r["tokens"] for r in recs)
+    line = "  ".join(
+        f"{k} {fmt(v)}" for k, v in
+        (("avg", sum(toks) / len(toks)), ("p50", percentile(toks, 50)),
+         ("p90", percentile(toks, 90)), ("p99", percentile(toks, 99)), ("max", toks[-1]))
+    )
+    lines = [c("TOKENS PER REQUEST  " + line, DIM, use_color)]
+    bins = log_bins(toks)
+    if bins:
+        edges, counts = bins
+        lines.append("  " + "".join(hist_chars(counts)))
+        lines.append(c(f"   sizes {fmt(edges[0])} .. {fmt(edges[-1])}", DIM, use_color))
+    return lines
+
+
+def detail_token_types(recs, use_color):
+    keys = ("input", "output", "crd", "cwr", "reason")
+    by_src, totals = token_type_totals(recs)
+    rows = []
+    for src in SOURCES:
+        s = by_src.get(src)
+        if not s or not any(s.values()):
+            continue
+        reason = "—" if src == "claude" else fmt(s["reason"])
+        rows.append((src, *(fmt(s[k]) for k in keys[:4]), reason,
+                     f"{cache_hit(s['crd'], s['input']):.0f}%"))
+    if totals and any(totals.values()):
+        rows.append(("TOTAL", *(fmt(totals[k]) for k in keys[:4]), fmt(totals["reason"]),
+                     f"{cache_hit(totals['crd'], totals['input']):.0f}%"))
+    return _table(["SOURCE", "INPUT", "OUTPUT", "CACHE-R", "CACHE-W", "REASON", "HIT"],
+                  rows, [10, 9, 9, 9, 9, 9, 6], ["l", "r", "r", "r", "r", "r", "r"], use_color)
+
+
+def detail_rhythm(recs, use_color):
+    hourly, weekday = rhythm_buckets(recs)
+    max_h, max_w = max(hourly) or 1, max(weekday) or 1
+    lines = [c("ACTIVITY · tokens by hour (local)", BOLD, use_color)]
+    for row in range(6):
+        cells = []
+        for col in range(4):
+            h = row * 4 + col
+            bar = BLOCKS[int(round(hourly[h] / max_h * 8))] * 10
+            cells.append(f"{h:02d} {bar} {fmt(hourly[h])}")
+        lines.append("  " + "  ".join(cells))
+    lines.append(c("ACTIVITY · tokens by weekday (Mon..Sun)", BOLD, use_color))
+    for i, name in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]):
+        bar = BLOCKS[int(round(weekday[i] / max_w * 8))] * 10
+        lines.append(f"  {name} {bar} {fmt(weekday[i])}")
+    return lines
+
+
+def detail_projects(recs, total_tokens, use_color, cap=12):
+    rows = sorted(aggregate_projects(recs).items(), key=lambda kv: -kv[1]["tokens"])
+    table_rows = []
+    for name, p in rows[:cap]:
+        name = name if len(name) <= 28 else name[:25] + "..."
+        share = p["tokens"] / total_tokens * 100 if total_tokens else 0
+        table_rows.append((name, fmt(p["reqs"]), fmt(p["tokens"]),
+                           fmt(p["tokens"] / p["reqs"]), f"{share:.1f}%"))
+    lines = _table(["PROJECT", "REQS", "TOKENS", "AVG/REQ", "SHARE"],
+                   table_rows, [30, 7, 10, 9, 7], ["l", "r", "r", "r", "r"], use_color)
+    if len(rows) > cap:
+        lines.append(c(f"  ⋯ +{len(rows) - cap} more projects", DIM, use_color))
+    return lines
+
+
+def run_detail(recs, label, use_color):
+    total_tokens = sum(r["tokens"] for r in recs)
+    print(c(f"MODELS · {label} · {fmt(len(recs))} requests · {fmt(total_tokens)} tokens", BOLD, use_color))
+    for section in (detail_model_table(aggregate_models(recs), total_tokens, use_color),
+                    detail_request_stats(recs, use_color),
+                    detail_token_types(recs, use_color),
+                    detail_rhythm(recs, use_color),
+                    detail_projects(recs, total_tokens, use_color)):
+        print("\n".join(section))
+        print()
+
+
 def main():
     ap = argparse.ArgumentParser(description="Stacked token-usage dashboard for all agents found in local logs")
     ap.add_argument("--period", choices=["daily", "weekly", "monthly"],
                     help="show one panel only (default: dashboard = all three)")
+    ap.add_argument("--detail", action="store_true",
+                    help="detail report (models, per-request stats, token types, activity, projects) "
+                         "instead of the dashboard; --period scopes it to that window")
     ap.add_argument("--requests", action="store_true",
                     help="also show per-bucket request counts and count statistics")
     ap.add_argument("--no-color", action="store_true", help="disable ANSI color")
@@ -234,6 +441,21 @@ def main():
     if not records:
         print("no token usage records found (checked Claude Code / pi / OpenCode logs)")
         sys.exit(1)
+
+    parsed = parse_records(records)
+    if args.detail:
+        recs = parsed
+        label = "all history"
+        if args.period:
+            _, desc, n = LONG[args.period]
+            buckets = bucketize(records)
+            span = buckets[args.period][-n:]
+            if span:
+                start = datetime(span[0][0].year, span[0][0].month, span[0][0].day)
+                recs = [r for r in recs if r["dt"] >= start]
+                label = f"{desc} (since {span[0][0].strftime('%m-%d')})"
+        run_detail(recs, label, use_color)
+        return
 
     buckets = bucketize(records)
     now = datetime.now()

@@ -5,8 +5,10 @@ import unittest
 from datetime import datetime, timezone
 
 import toku
-from toku import (parse_ts_local, bucketize, period_totals, render_bar, panel_lines,
-                  fmt, stats, CYAN, MAGENTA)
+from toku import (parse_ts_local, parse_records, bucketize, period_totals, render_bar, panel_lines,
+                  fmt, stats, percentile, log_bins, hist_chars, aggregate_models, aggregate_projects,
+                  token_type_totals, cache_hit, rhythm_buckets, detail_model_table,
+                  CYAN, MAGENTA)
 
 
 def rec(ts, src, tokens):
@@ -160,6 +162,76 @@ class PanelLines(unittest.TestCase):
         self.assertTrue(lines[4].startswith("         "))  # aligned under 'stats  '
         self.assertIn("mean 1.5", lines[4])
         self.assertIn("max 2", lines[4])
+
+
+class Detail(unittest.TestCase):
+    def test_percentile_nearest_rank(self):
+        self.assertEqual(percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 50), 5)
+        self.assertEqual(percentile([1, 2, 3, 4, 5], 90), 5)
+        self.assertEqual(percentile([7], 50), 7)
+        self.assertIsNone(percentile([], 50))
+
+    def test_log_bins(self):
+        b = log_bins([10, 100, 1000, 10000, 100000, 1000000], n=12)
+        self.assertIsNotNone(b)
+        edges, counts = b
+        self.assertEqual(len(edges), 13)
+        self.assertEqual(sum(counts), 6)
+        self.assertIsNone(log_bins([5, 6, 7]))  # too narrow a range
+        self.assertIsNone(log_bins([10]))       # single value
+
+    def test_hist_chars(self):
+        self.assertEqual(hist_chars([0, 4, 8]), [" ", "▌", "█"])
+        self.assertEqual(hist_chars([0, 0]), [" ", " "])
+
+    def _parsed(self, raws):
+        return parse_records(raws, tz=timezone.utc)
+
+    def test_aggregate_models(self):
+        raws = [
+            dict(rec("2026-08-16T12:00:00", "claude", 100), model="m1", project="/p/a", cost_usd=None),
+            dict(rec("2026-08-16T13:00:00", "pi", 50), model="m2", project="/p/b", cost_usd=0.25),
+            dict(rec("2026-08-16T14:00:00", "pi", 80), model="m1", project="/p/a", cost_usd=0.1),
+        ]
+        pr = self._parsed(raws)
+        m = aggregate_models(pr)
+        self.assertEqual(m["m1"], {"reqs": 2, "tokens": 180, "cost": 0.1, "cost_known": True})
+        self.assertEqual(m["m2"], {"reqs": 1, "tokens": 50, "cost": 0.25, "cost_known": True})
+        projs = aggregate_projects(pr)
+        self.assertEqual(projs["a"]["tokens"], 180)
+        self.assertEqual(projs["b"]["tokens"], 50)
+
+    def test_token_types_and_cache_hit(self):
+        raws = [
+            dict(rec("2026-08-16T12:00:00", "pi", 1000), input_tokens=800, output_tokens=100,
+                 cache_read_tokens=50, cache_write_tokens=50, reasoning_tokens=40),
+            dict(rec("2026-08-16T13:00:00", "claude", 900), input_tokens=900, output_tokens=0,
+                 cache_read_tokens=0, cache_write_tokens=0),
+        ]
+        pr = self._parsed(raws)
+        by_src, totals = token_type_totals(pr)
+        self.assertEqual(by_src["pi"], {"input": 800, "output": 100, "crd": 50, "cwr": 50, "reason": 40})
+        self.assertEqual(totals["input"], 1700)
+        self.assertAlmostEqual(cache_hit(50, 800), 50 / 850 * 100)
+        self.assertEqual(cache_hit(0, 0), 0)
+
+    def test_rhythm_buckets(self):
+        raws = [rec(f"2026-08-16T{hh:02d}:00:00", "claude", 10) for hh in (0, 0, 6, 23)]
+        pr = self._parsed(raws)
+        hourly, weekday = rhythm_buckets(pr)
+        self.assertEqual(hourly[0], 20)
+        self.assertEqual(hourly[6], 10)
+        self.assertEqual(hourly[23], 10)
+        self.assertEqual(weekday[6], 40)  # 2026-08-16 is a Sunday
+
+    def test_model_table_sorted_and_capped(self):
+        models = {"a": {"reqs": 1, "tokens": 10, "cost": 0, "cost_known": False},
+                  "b": {"reqs": 1, "tokens": 99, "cost": 0, "cost_known": False}}
+        lines = detail_model_table(models, 109, False, cap=1)
+        self.assertIn("b", lines[1])       # header is line 0; top row is the largest model
+        self.assertIn("90.8%", lines[1])
+        self.assertIn("+1 more models", lines[-1])
+        self.assertIn("—", lines[1])       # no cost known -> em dash
 
 
 class Fmt(unittest.TestCase):

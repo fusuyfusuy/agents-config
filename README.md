@@ -217,6 +217,11 @@ toku
 # Isolate one granularity
 toku --period daily|weekly|monthly
 
+# Detail report: models, per-request stats, token types, activity, projects
+# (—period scopes it to that window, default is all history)
+toku --detail
+toku --detail --period weekly
+
 # Plain text for pipes/less
 toku --no-color | less
 ```
@@ -237,4 +242,12 @@ DAILY (last 14 days)      peak 08-19 1.17B
 - **Local-time bucketing**: timestamps from the logs are UTC; records are shifted to the machine's local zone before day/week/month grouping, so "today" means your today.
 - **Honest scaling**: bars share the panel's peak; sub-⅛-cell buckets degrade to a dim `▏` marker instead of disappearing. Quiescent weeks/months are simply absent (no phantom zero bars).
 - **Per-panel stats**: a dim line under each panel reports mean, median, min, max, and population σ across the visible buckets (skipped when the panel has fewer than two buckets, where they'd be degenerate).
+- **`--requests`**: adds a right-aligned message-count column to every bar row, a REQUESTS headline line, and an aligned count-stats section (same five stats over request counts).
+- **`--detail`**: replaces the dashboard with a report over all history (scoped to the `--period` window when given):
+  - **Model leaderboard** — per model: requests, tokens, average tokens/request, share of total, and cost where the logs persist it (Claude logs persist none → `—`). Names front-truncate so version/date suffixes stay visible.
+  - **Tokens per request** — avg + nearest-rank p50/p90/p99/max with a log-spaced request-size histogram (exposes the heavy tail: a few oversized requests dominating spend).
+  - **Token-type split** — input / output / cache-read / cache-write / reasoning per source + total, with a cache-hit ratio per source.
+  - **Activity rhythm** — tokens by hour of day (4×6 grid) and by weekday (Mon..Sun).
+  - **Project lifetime table** — requests, tokens, avg/req, share per project directory.
+- Headline totals are week/month-to-date (since local midnight / Monday / month start).
 - Headline totals are week/month-to-date (since local midnight / Monday / month start).
