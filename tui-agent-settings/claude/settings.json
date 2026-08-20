@@ -5,7 +5,8 @@
   "enableWorkflows": true,
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/statusline-command.sh"
+    "command": "~/.claude/statusline-command.sh",
+    "refreshInterval": 5
   },
   "enabledPlugins": {
     "context7@claude-plugins-official": true
