@@ -407,18 +407,28 @@ def main() -> None:
         choices=["rolling", "weekly", "monthly"],
         help="show one window's who-ate-it table (default: rolling = active gate)",
     )
+    ap.add_argument("--cost", action="store_true", help="total spent per window only, no tables")
     ap.add_argument("--detail", action="store_true", help="all windows, full per-session tables (long)")
     ap.add_argument("--no-color", action="store_true", help="disable ANSI color")
     args = ap.parse_args()
 
     use_color = not args.no_color and sys.stdout.isatty()
     usage = fetch_windows()
-    print_windows(usage, use_color)
 
     records = load_paid_records()
     if not records:
         print("no 'opencode-go' traffic found in local opencode.db")
         return
+
+    if args.cost:
+        picked = [args.window] if args.window else [k for k, _ in WINDOWS]
+        bounds = window_bounds(usage)
+        for key in picked:
+            s = summarize(records, bounds[key])
+            print(f"  {pad(dict(WINDOWS)[key], 12)}  {money(s['cost'])}")
+        return
+
+    print_windows(usage, use_color)
 
     if args.detail:
         picked = [k for k, _ in WINDOWS]
