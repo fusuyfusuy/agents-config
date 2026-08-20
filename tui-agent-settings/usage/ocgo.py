@@ -133,13 +133,17 @@ def load_session_map() -> dict:
 
 
 def load_paid_records() -> list[dict]:
-    """Paid opencode-go messages from the local db, normalized per record.
+    """Paid opencode-go messages, normalized per record, across BOTH the
+    local opencode.db AND pi session logs (pi is where opencode-go models are
+    actually run in this setup).
 
-    Reuses collect_agent_usage.parse_opencode (already-tested message parser);
-    filters to the paid provider and joins session title/directory.
+    Reuses collect_agent_usage.parse_opencode / parse_pi (already-tested
+    message parsers); filters to the paid provider and joins session
+    title/directory where available.
     """
     sessions = load_session_map()
     records = []
+
     for rec in cau.parse_opencode(cau.discover_opencode()):
         if not (rec["model"] or "").startswith(f"{PAID_PROVIDER}/"):
             continue
@@ -158,6 +162,26 @@ def load_paid_records() -> list[dict]:
             "total": rec["total_tokens"],
             "cost": rec["cost_usd"] or 0.0,
         })
+
+    for rec in cau.parse_pi(cau.discover_pi()):
+        if rec.get("provider") != PAID_PROVIDER:
+            continue
+        ts_ms = int(parse_epoch(rec["timestamp"]) * 1000) if rec["timestamp"] else 0
+        # pi logs carry no per-session title, only the session-dir project slug.
+        records.append({
+            "ts_ms": ts_ms,
+            "model": rec["model"],
+            "title": "",
+            "directory": rec.get("project") or "",
+            "input": rec["input_tokens"],
+            "output": rec["output_tokens"],
+            "cache_read": rec["cache_read_tokens"],
+            "cache_write": rec["cache_write_tokens"],
+            "reasoning": rec["reasoning_tokens"],
+            "total": rec["total_tokens"],
+            "cost": rec["cost_usd"] or 0.0,
+        })
+
     return records
 
 
@@ -361,7 +385,7 @@ def window_detail(label: str, sum: dict, use_color: bool, detail: bool) -> list[
             use_color,
         )
         if extra:
-            lines.append(c("  ⋯ +{extra} more projects", DIM, use_color))
+            lines.append(c(f"  ⋯ +{extra} more projects", DIM, use_color))
     lines.append("")
     return lines
 

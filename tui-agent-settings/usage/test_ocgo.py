@@ -68,6 +68,7 @@ def test_subtract_period_monthly():
 
 def test_load_paid_records_filters_provider():
     orig_discover, orig_parse = cau.discover_opencode, cau.parse_opencode
+    orig_pdisc, orig_pparse = cau.discover_pi, cau.parse_pi
     orig_map = O.load_session_map
     try:
         cau.discover_opencode = lambda: ["FAKE.db"]
@@ -83,17 +84,37 @@ def test_load_paid_records_filters_provider():
              "cache_write_tokens": 0, "reasoning_tokens": 0, "total_tokens": 297,
              "cost_usd": 0.0},
         ])
+        cau.discover_pi = lambda: ["FAKE_PI.jsonl"]
+        cau.parse_pi = lambda files: iter([
+            # pi ran an opencode-go model has a provider field -> included
+            {"source": "pi", "timestamp": "2026-08-19T13:00:00Z", "session_id": "pids",
+             "project": "--home-devhax-projects-fusuycorp-titirek--",
+             "provider": O.PAID_PROVIDER, "model": "kimi-k3",
+             "input_tokens": 60, "output_tokens": 6, "cache_read_tokens": 0,
+             "cache_write_tokens": 0, "reasoning_tokens": 0, "total_tokens": 66,
+             "cost_usd": 0.02},
+            # pi openrouter/free model -> excluded
+            {"source": "pi", "timestamp": "2026-08-19T13:00:00Z", "session_id": "pfree",
+             "project": "--some--", "provider": "openrouter", "model": "~deepseek/x",
+             "input_tokens": 1, "output_tokens": 1, "cache_read_tokens": 0,
+             "cache_write_tokens": 0, "reasoning_tokens": 0, "total_tokens": 2,
+             "cost_usd": 0.0},
+        ])
         O.load_session_map = lambda: {"s1": ("Free too", "/p"), "s2": ("Ignored", "/q")}
         recs = O.load_paid_records()
-        assert len(recs) == 1, f"expected only paid provider, got {len(recs)}"
-        r = recs[0]
-        assert r["model"] == "big-pickle", r["model"]
-        assert r["title"] == "Free too", r
-        assert r["directory"] == "/p"
-        assert r["total"] == 15 and r["cost"] == 0.001
-        print("paid-provider filter: OK")
+        # one opencode paid + one pi opencode-go paid = 2
+        assert len(recs) == 2, f"expected 2 paid records, got {len(recs)}: {recs}"
+        oc = [r for r in recs if r["model"] == "big-pickle"]
+        assert len(oc) == 1 and oc[0]["title"] == "Free too" and oc[0]["total"] == 15
+        pi_kimi = [r for r in recs if r["model"] == "kimi-k3"]
+        assert len(pi_kimi) == 1, f"kimi-k3 from pi missing: {recs}"
+        assert pi_kimi[0]["total"] == 66 and pi_kimi[0]["cost"] == 0.02
+        assert pi_kimi[0]["directory"] == "--home-devhax-projects-fusuycorp-titirek--"
+        assert not any(r["model"] == "~deepseek/x" for r in recs)
+        print("paid-provider filter (opencode + pi): OK")
     finally:
         cau.discover_opencode, cau.parse_opencode = orig_discover, orig_parse
+        cau.discover_pi, cau.parse_pi = orig_pdisc, orig_pparse
         O.load_session_map = orig_map
 
 

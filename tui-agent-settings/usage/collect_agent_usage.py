@@ -29,7 +29,7 @@ def ms_to_iso(ms) -> str:
 def record(source, timestamp, session_id, project, model,
            input_tokens=0, output_tokens=0, cache_read_tokens=0,
            cache_write_tokens=0, reasoning_tokens=0, cost_usd=None,
-           total_tokens=None):
+           total_tokens=None, provider=None):
     if total_tokens is None:
         total_tokens = input_tokens + output_tokens + cache_read_tokens + cache_write_tokens
     return {
@@ -37,6 +37,7 @@ def record(source, timestamp, session_id, project, model,
         "timestamp": timestamp,
         "session_id": session_id,
         "project": project,
+        "provider": provider,
         "model": model,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
@@ -126,9 +127,11 @@ def parse_pi(files):
                     message = entry.get("message") or {}
                     usage = message.get("usage")
                     model = message.get("responseModel") or message.get("model")
+                    provider = message.get("provider")
                 elif etype in ("compaction", "branch_summary"):
                     usage = entry.get("usage")
                     model = entry.get("model")
+                    provider = entry.get("provider")
                 else:
                     continue
                 if not usage:
@@ -139,6 +142,7 @@ def parse_pi(files):
                     timestamp=entry.get("timestamp"),
                     session_id=entry.get("id"),
                     project=project_slug,
+                    provider=provider,
                     model=model,
                     input_tokens=int(usage.get("input") or 0),
                     output_tokens=int(usage.get("output") or 0),
