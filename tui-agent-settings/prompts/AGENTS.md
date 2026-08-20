@@ -6,6 +6,7 @@
 - Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
 - Keep components modular and concerns clearly separated.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+- Ask before guessing: an underspecified request gets 1-4 structured questions with concrete options, never an assumed scope, deliverable, or model.
 
 ## Explore → Plan → Approve → Execute
 
@@ -15,6 +16,7 @@ For non-trivial work (multi-file or non-trivial logic; same threshold as the Sub
 - **Plan**: Present a short one-paragraph plan — files to touch, approach, how you'll verify. The plan is a contract, not a document.
 - **Approve**: Stop and wait for explicit approval before writing code. If the approved scope changes mid-flight, re-present before continuing.
 - **Execute**: Apply the smallest change that satisfies the plan, then run the verification and report the result.
+- **Verify & report**: Before declaring multi-file work done, `git diff --stat` and spot-check the hunks you don't fully trust — collapsed tool output is not verification. Report what changed + how you verified + what you deferred, in the same structured shape you demand from subagents.
 
 Delegation and worktree isolation for the Explore and Execute phases follow the Subagent Management Protocol below. This gate never suspends the Ponytail ladder — same "understand first, then climb" discipline.
 
@@ -30,6 +32,7 @@ Delegation and worktree isolation for the Explore and Execute phases follow the 
 
 - **Session Start / Warmup**: Before performing multi-file search or directory crawls, run `agent-ctx dump` to read existing memory, architectural decisions, and the symbol map (regenerated live, never stale). For a full uncapped map alone, run `agent-ctx map --stdout`. Never read `.agents/repo_map.md` directly — it may be stale; `dump` and `map --stdout` always regenerate.
 - **Task Completion**: After non-trivial tasks or architecture decisions, log with `agent-ctx log --action ... --summary ... --files ...` — `--summary` is one high-level line, what changed + why, caveman style (drop filler/hedging, keep exact terms, see `agent-context` skill); save implementation detail for the commit message. Update `.agents/memory.md`/`.agents/decisions.md` with new invariants or gotchas, same style.
+- **Resuming work**: Before touching anything, run `git status` + `agent-ctx history --limit 5` and re-read your last plan/notes. Never re-explore what a previous session already mapped, and never continue from a stale assumption about the state of the tree.
 
 
 ## Ponytail — Lazy Senior Dev Mode

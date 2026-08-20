@@ -5,7 +5,7 @@ description: Recipes for git worktree isolation and the agent-kb error knowledge
 
 # Agent Processes
 
-Recipes supporting the Subagent Management Protocol in `AGENTS.md` (read that first for the rules). Full detail: [`PROCESSES.md`](file:///home/devhax/projects/fusuyfusuy/agents-config/PROCESSES.md).
+Recipes supporting the Subagent Management Protocol in `AGENTS.md` (read that first for the rules). Full detail: [`PROCESSES.md`](file:///home/devhax/projects/fusuyfusuy/agents-config/tui-agent-settings/prompts/PROCESSES.md).
 
 ## When to use
 

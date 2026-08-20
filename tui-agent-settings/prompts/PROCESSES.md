@@ -11,10 +11,21 @@ Rule in [`AGENTS.md`](AGENTS.md). Only non-trivial work (multi-file or non-trivi
 - Present a one-paragraph plan before editing: **files**, **approach**, **verification**.
 - Wait for explicit approval; re-present if the approved scope changes.
 - Execute the smallest change, run the check, report the result.
+- After executing: `git diff --stat` and spot-check the hunks you don't fully trust — collapsed tool output is not verification — then report what changed, how it was verified, and what was deferred.
 
 Example plan:
 
 > Touch `collect_agent_usage.py` (add `parse_x` mirroring `parse_y`) and `test_collect_agent_usage.py` (one fixture). Verify: `python3 test_collect_agent_usage.py`.
+
+---
+
+## Asking Before Guessing
+
+Rule in [`AGENTS.md`](AGENTS.md). When a request is underspecified — scope, target, deliverable, or model left open — ask instead of assuming:
+
+- Ask 1-4 structured questions with 2-4 concrete options each (pi: `ask_user_question`; plain questions with options in other harnesses).
+- Mark your recommended option first; keep options mutually exclusive unless several genuinely apply.
+- Batch every question into one ask — one round per ambiguity, never a pestering sequence.
 
 ## Workspace Isolation (Git Worktrees)
 
@@ -69,6 +80,15 @@ agent-ctx log \
   --summary "<short_rationale_and_summary>" \
   --files "<comma_separated_files>"
 ```
+
+Resuming existing work? Before touching anything:
+
+```bash
+git status
+agent-ctx history --limit 5   # what your last session actually did
+```
+
+Re-read your last plan/WIP notes; never re-explore what a previous session already mapped, and never continue from a stale assumption about the tree.
 
 ---
 
