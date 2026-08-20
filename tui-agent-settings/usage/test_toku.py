@@ -5,8 +5,8 @@ import unittest
 from datetime import datetime, timezone
 
 import toku
-from toku import (parse_ts_local, bucketize, period_totals, render_bar, fmt,
-                  stats, CYAN, MAGENTA)
+from toku import (parse_ts_local, bucketize, period_totals, render_bar, panel_lines,
+                  fmt, stats, CYAN, MAGENTA)
 
 
 def rec(ts, src, tokens):
@@ -46,8 +46,15 @@ class Bucketize(unittest.TestCase):
         self.assertEqual(keys, [datetime(2026, 7, 31).date(), datetime(2026, 8, 1).date(),
                                 datetime(2026, 8, 16).date(), datetime(2026, 8, 17).date()])
         day16 = dict(b[2][1])
-        self.assertEqual(day16, {"claude": 1000, "pi": 500})
-        self.assertEqual(sum(b[0][1].values()), 300)
+        self.assertEqual(day16, {"claude": {"tokens": 1000, "msgs": 1},
+                                 "pi": {"tokens": 500, "msgs": 1}})
+        self.assertEqual(sum(e["tokens"] for e in b[0][1].values()), 300)
+
+    def test_msgs_accumulate_per_bucket(self):
+        b = bucketize([rec("2026-08-16T12:00:00", "claude", 100),
+                       rec("2026-08-16T13:00:00", "claude", 50),
+                       rec("2026-08-16T14:00:00", "pi", 0)], tz=timezone.utc)["daily"]
+        self.assertEqual(b[0][1], {"claude": {"tokens": 150, "msgs": 2}})
 
     def test_weekly(self):
         b = bucketize(self.RECORDS, tz=timezone.utc)["weekly"]
@@ -55,15 +62,15 @@ class Bucketize(unittest.TestCase):
         # W31 anchors 07-27 (holds 07-31 + 08-01), W33 anchors 08-10, W34 anchors 08-17
         self.assertEqual(keys, [datetime(2026, 7, 27).date(), datetime(2026, 8, 10).date(),
                                 datetime(2026, 8, 17).date()])
-        self.assertEqual(sum(b[0][1].values()), 1000)   # 300 + 700
-        self.assertEqual(sum(b[1][1].values()), 1500)   # 1000 + 500
-        self.assertEqual(sum(b[2][1].values()), 200)
+        self.assertEqual(sum(e["tokens"] for e in b[0][1].values()), 1000)   # 300 + 700
+        self.assertEqual(sum(e["tokens"] for e in b[1][1].values()), 1500)   # 1000 + 500
+        self.assertEqual(sum(e["tokens"] for e in b[2][1].values()), 200)
 
     def test_monthly(self):
         b = bucketize(self.RECORDS, tz=timezone.utc)["monthly"]
         keys = [d for d, _ in b]
         self.assertEqual(keys, [datetime(2026, 7, 1).date(), datetime(2026, 8, 1).date()])
-        self.assertEqual(sum(b[1][1].values()), 2400)
+        self.assertEqual(sum(e["tokens"] for e in b[1][1].values()), 2400)
 
     def test_skips_untimestamped_and_zero(self):
         b = bucketize([rec(None, "claude", 999), rec("2026-08-16T00:00:00", "pi", 0)],
@@ -107,7 +114,9 @@ class PeriodTotals(unittest.TestCase):
             rec("2026-07-15T09:00:00Z", "claude", 999),   # before month start
         ]
         t = period_totals(records, self.NOW, tz=timezone.utc)
-        self.assertEqual(t, {"today": 100, "week": 300, "month": 600})
+        self.assertEqual(t, {"today": {"tokens": 100, "msgs": 1},
+                             "week": {"tokens": 300, "msgs": 2},
+                             "month": {"tokens": 600, "msgs": 3}})
 
 
 class Stats(unittest.TestCase):
@@ -131,6 +140,28 @@ class Stats(unittest.TestCase):
         self.assertIsNone(stats([]))
 
 
+class PanelLines(unittest.TestCase):
+    BUCKETS = [
+        (datetime(2026, 8, 16).date(), {"claude": {"tokens": 100, "msgs": 2}}),
+        (datetime(2026, 8, 17).date(), {"pi": {"tokens": 300, "msgs": 1}}),
+    ]
+
+    def test_token_rows_only_by_default(self):
+        lines = panel_lines("T (x)", self.BUCKETS, toku.daily_label, 20, False, 2026, counts=False)
+        self.assertEqual(len(lines), 4)  # title + 2 rows + 1 stats line
+        self.assertTrue(lines[3].startswith("  stats  "))
+        self.assertNotIn(" 1 ", lines[1])  # no count column
+
+    def test_count_column_and_stats(self):
+        lines = panel_lines("T (x)", self.BUCKETS, toku.daily_label, 20, False, 2026, counts=True)
+        self.assertEqual(len(lines), 5)  # + 1 count-stats line
+        self.assertRegex(lines[1], r"100\s+2$")     # token total + count column
+        self.assertRegex(lines[2], r"300\s+1\s+← peak$")
+        self.assertTrue(lines[4].startswith("         "))  # aligned under 'stats  '
+        self.assertIn("mean 1.5", lines[4])
+        self.assertIn("max 2", lines[4])
+
+
 class Fmt(unittest.TestCase):
     def test_units(self):
         self.assertEqual(fmt(2_000_000_000), "2.00B")
@@ -138,6 +169,7 @@ class Fmt(unittest.TestCase):
         self.assertEqual(fmt(1500), "2k")
         self.assertEqual(fmt(42), "42")
         self.assertEqual(fmt(0), "0")
+        self.assertEqual(fmt(1.5), "1.5")   # sub-thousand fraction (count means)
 
 
 if __name__ == "__main__":

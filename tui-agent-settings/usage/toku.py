@@ -56,7 +56,7 @@ def fmt(n):
         return f"{n / 1e6:.1f}M"
     if n >= 1e3:
         return f"{n / 1e3:.0f}k"
-    return f"{int(n)}"
+    return f"{n:.1f}" if n != int(n) else f"{int(n)}"
 
 
 def all_records():
@@ -64,10 +64,17 @@ def all_records():
         yield from parse(discover())
 
 
+def _add(buckets, date_key, src, toks):
+    cell = buckets.setdefault(date_key, {})
+    entry = cell.setdefault(src, {"tokens": 0, "msgs": 0})
+    entry["tokens"] += toks
+    entry["msgs"] += 1
+
+
 def bucketize(records, tz=None):
     """Group records into daily / ISO-weekly / monthly buckets (local time).
 
-    Returns {'daily': [(date, {src: tokens}), ...], ...} lists, ascending.
+    Returns {'daily': [(date, {src: {'tokens','msgs'}}), ...], ...}, ascending.
     """
     daily, weekly, monthly = {}, {}, {}
     local_tz = tz or datetime.now().astimezone().tzinfo
@@ -80,14 +87,9 @@ def bucketize(records, tz=None):
             continue
         src = r.get("source")
         d = dt.date()
-        daily.setdefault(d, {})
-        daily[d][src] = daily[d].get(src, 0) + toks
-        monday = d - timedelta(days=d.weekday())
-        weekly.setdefault(monday, {})
-        weekly[monday][src] = weekly[monday].get(src, 0) + toks
-        first = d.replace(day=1)
-        monthly.setdefault(first, {})
-        monthly[first][src] = monthly[first].get(src, 0) + toks
+        _add(daily, d, src, toks)
+        _add(weekly, d - timedelta(days=d.weekday()), src, toks)
+        _add(monthly, d.replace(day=1), src, toks)
     return {
         "daily": sorted(daily.items()),
         "weekly": sorted(weekly.items()),
@@ -105,15 +107,18 @@ def period_totals(records, now, tz=None):
                 - timedelta(days=now.date().weekday()),
         "month": now.replace(hour=0, minute=0, second=0, microsecond=0, day=1),
     }
-    totals = {k: 0 for k in starts}
+    totals = {k: {"tokens": 0, "msgs": 0} for k in starts}
     for r in records:
         dt = parse_ts_local(r.get("timestamp"), local_tz)
         if dt is None:
             continue
         toks = r.get("total_tokens") or 0
+        if toks <= 0:
+            continue
         for k, start in starts.items():
             if dt >= start:
-                totals[k] += toks
+                totals[k]["tokens"] += toks
+                totals[k]["msgs"] += 1
     return totals
 
 
@@ -157,16 +162,20 @@ def stats(vals):
     return {"mean": mean, "median": median, "min": vals[0], "max": vals[-1], "std": var ** 0.5}
 
 
-def panel_lines(title, buckets, label_fn, bar_w, use_color, current_year=None):
-    """buckets: ascending [(anchor_date, {src: tokens})]."""
-    totals = [{"anchor": a, "total": sum(b.values())} for a, b in buckets]
+def panel_lines(title, buckets, label_fn, bar_w, use_color, current_year=None, counts=False):
+    """buckets: ascending [(anchor_date, {src: {'tokens','msgs'}})]."""
+    totals = [
+        {"anchor": a, "total": sum(e["tokens"] for e in b.values()),
+         "msgs": sum(e["msgs"] for e in b.values())}
+        for a, b in buckets
+    ]
     max_total = max((t["total"] for t in totals), default=0)
     lines = [c(title, BOLD, use_color)]
     if max_total:
         peak = max(totals, key=lambda t: t["total"])
         lines[0] += c(f"      peak {label_fn(peak['anchor'], current_year)} {fmt(peak['total'])}", DIM, use_color)
     for (anchor, bucket), t in zip(buckets, totals):
-        cells = render_bar([bucket.get(s, 0) for s in SOURCES], max_total, bar_w)
+        cells = render_bar([bucket.get(s, {}).get("tokens", 0) for s in SOURCES], max_total, bar_w)
         if not any(col for _, col in cells) and t["total"] > 0:
             cells[0] = ("▏", "")  # non-zero but below 1/8-cell resolution
         bar = "".join(
@@ -174,6 +183,8 @@ def panel_lines(title, buckets, label_fn, bar_w, use_color, current_year=None):
             for ch, col in cells
         )
         row = f"  {label_fn(anchor, current_year):<7} {bar}  {fmt(t['total']):>9}"
+        if counts:
+            row += f"  {fmt(t['msgs']):>9}"
         if max_total and t["total"] == max_total:
             row += c("  ← peak", DIM, use_color)
         lines.append(row)
@@ -184,6 +195,13 @@ def panel_lines(title, buckets, label_fn, bar_w, use_color, current_year=None):
             (("mean", s["mean"]), ("median", s["median"]), ("min", s["min"]), ("max", s["max"]), ("σ", s["std"]))
         )
         lines.append(c("  stats  " + stat_str, DIM, use_color))
+        if counts:
+            m = stats([t["msgs"] for t in totals])
+            mstr = "  ".join(
+                f"{k} {fmt(v)}" for k, v in
+                (("mean", m["mean"]), ("median", m["median"]), ("min", m["min"]), ("max", m["max"]), ("σ", m["std"]))
+            )
+            lines.append(c("         " + mstr, DIM, use_color))
     return lines
 
 
@@ -206,6 +224,8 @@ def main():
     ap = argparse.ArgumentParser(description="Stacked token-usage dashboard for all agents found in local logs")
     ap.add_argument("--period", choices=["daily", "weekly", "monthly"],
                     help="show one panel only (default: dashboard = all three)")
+    ap.add_argument("--requests", action="store_true",
+                    help="also show per-bucket request counts and count statistics")
     ap.add_argument("--no-color", action="store_true", help="disable ANSI color")
     args = ap.parse_args()
 
@@ -218,18 +238,23 @@ def main():
     buckets = bucketize(records)
     now = datetime.now()
     totals = period_totals(records, now)
-    print(c(f"TOTAL TOKENS   today {fmt(totals['today'])} · this week {fmt(totals['week'])} · this month {fmt(totals['month'])}", BOLD, use_color))
+    head = f"TOTAL TOKENS   today {fmt(totals['today']['tokens'])} · this week {fmt(totals['week']['tokens'])} · this month {fmt(totals['month']['tokens'])}"
+    print(c(head, BOLD, use_color))
+    if args.requests:
+        req = (f"REQUESTS       today {fmt(totals['today']['msgs'])} · this week {fmt(totals['week']['msgs'])}"
+               f" · this month {fmt(totals['month']['msgs'])}")
+        print(c(req, BOLD, use_color))
     print()
 
     cols = shutil.get_terminal_size((120, 24)).columns
-    bar_w = max(12, min(64, cols - 30))
+    bar_w = max(12, min(64, cols - (42 if args.requests else 30)))
 
     labels = {"daily": daily_label, "weekly": weekly_label, "monthly": monthly_label}
     picked = [args.period] if args.period else list(LONG)
     for key in picked:
         title, desc, n = LONG[key]
         lines = panel_lines(f"{title} ({desc})", buckets[key][-n:], labels[key], bar_w, use_color,
-                            current_year=now.year)
+                            current_year=now.year, counts=args.requests)
         print("\n".join(lines))
         print()
 
