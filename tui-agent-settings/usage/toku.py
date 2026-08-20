@@ -144,6 +144,19 @@ def render_bar(values, max_total, bar_w):
     return out
 
 
+def stats(vals):
+    """Mean / median / min / max / population std of bucket totals."""
+    vals = sorted(vals)
+    n = len(vals)
+    if n == 0:
+        return None
+    mean = sum(vals) / n
+    mid = n // 2
+    median = vals[mid] if n % 2 else (vals[mid - 1] + vals[mid]) / 2
+    var = sum((v - mean) ** 2 for v in vals) / n
+    return {"mean": mean, "median": median, "min": vals[0], "max": vals[-1], "std": var ** 0.5}
+
+
 def panel_lines(title, buckets, label_fn, bar_w, use_color, current_year=None):
     """buckets: ascending [(anchor_date, {src: tokens})]."""
     totals = [{"anchor": a, "total": sum(b.values())} for a, b in buckets]
@@ -164,6 +177,13 @@ def panel_lines(title, buckets, label_fn, bar_w, use_color, current_year=None):
         if max_total and t["total"] == max_total:
             row += c("  ← peak", DIM, use_color)
         lines.append(row)
+    if len(totals) >= 2:
+        s = stats([t["total"] for t in totals])
+        stat_str = "  ".join(
+            f"{k} {fmt(v)}" for k, v in
+            (("mean", s["mean"]), ("median", s["median"]), ("min", s["min"]), ("max", s["max"]), ("σ", s["std"]))
+        )
+        lines.append(c("  stats  " + stat_str, DIM, use_color))
     return lines
 
 

@@ -35,6 +35,16 @@ Delegation and worktree isolation for the Explore and Execute phases follow the 
 - **Resuming work**: Before touching anything, run `git status` + `agent-ctx history --limit 5` and re-read your last plan/notes. Never re-explore what a previous session already mapped, and never continue from a stale assumption about the state of the tree.
 
 
+## Think in Code — Compute, Don't Read
+
+The costliest pattern is reading N files into context to extract one fact. Before any Read, ask: "can a script answer this in one line?" If yes, run it — raw contents stay on disk, context only sees the result.
+
+- Orientation / inventory: `agent-ctx dump --focus <area>`; symbol lists via `rg -n "^(def |class |fn |export )" src`
+- Counts: `rg -c pattern src | awk -F: '{s+=$2} END{print s}'`
+- API surface of one file: `python3 -c "import ast,sys; ..." file.py`
+- Keep summaries small: `head -30`, `wc -l`, `sort | uniq -c`. The model decides; the script counts.
+
+
 ## Ponytail — Lazy Senior Dev Mode
 
 You are a lazy senior developer. Lazy means efficient, not careless. The best code is the code never written.

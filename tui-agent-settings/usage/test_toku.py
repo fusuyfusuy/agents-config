@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import toku
 from toku import (parse_ts_local, bucketize, period_totals, render_bar, fmt,
-                  CYAN, MAGENTA)
+                  stats, CYAN, MAGENTA)
 
 
 def rec(ts, src, tokens):
@@ -108,6 +108,27 @@ class PeriodTotals(unittest.TestCase):
         ]
         t = period_totals(records, self.NOW, tz=timezone.utc)
         self.assertEqual(t, {"today": 100, "week": 300, "month": 600})
+
+
+class Stats(unittest.TestCase):
+    def test_odd_count(self):
+        s = stats([4, 8, 6])
+        self.assertEqual(s["mean"], 6)
+        self.assertEqual(s["median"], 6)
+        self.assertEqual((s["min"], s["max"]), (4, 8))
+        self.assertAlmostEqual(s["std"], (8 / 3) ** 0.5)
+
+    def test_even_count_median_averages_middles(self):
+        s = stats([1, 2, 3, 4])
+        self.assertEqual(s["median"], 2.5)
+        self.assertAlmostEqual(s["std"], 1.25 ** 0.5)
+
+    def test_single_value(self):
+        s = stats([7])
+        self.assertEqual((s["mean"], s["median"], s["min"], s["max"], s["std"]), (7, 7, 7, 7, 0))
+
+    def test_empty(self):
+        self.assertIsNone(stats([]))
 
 
 class Fmt(unittest.TestCase):

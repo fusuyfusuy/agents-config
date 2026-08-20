@@ -227,6 +227,7 @@ TOTAL TOKENS   today 332.5M · this week 2.53B · this month 4.85B
 DAILY (last 14 days)      peak 08-19 1.17B
   08-13   ███████████████████████████████████████████▌   796.1M
   08-19   ██████████████████████████████████████████████ 1.17B  ← peak
+  stats  mean 346.4M  median 306.4M  min 164k  max 1.17B  σ 323.4M
 
   █ claude █ pi █ opencode   · grouped by local time
 ```
@@ -235,4 +236,5 @@ DAILY (last 14 days)      peak 08-19 1.17B
 - **Everything in one view**: same parsers as `collect_agent_usage.py`, so every logged assistant message with usage counts (including free providers) appears — not just paid traffic. Bars are stacked per source (claude=cyan, pi=magenta, opencode=green) at ⅛-cell resolution; the trailing filled unit colors a mixed cell.
 - **Local-time bucketing**: timestamps from the logs are UTC; records are shifted to the machine's local zone before day/week/month grouping, so "today" means your today.
 - **Honest scaling**: bars share the panel's peak; sub-⅛-cell buckets degrade to a dim `▏` marker instead of disappearing. Quiescent weeks/months are simply absent (no phantom zero bars).
+- **Per-panel stats**: a dim line under each panel reports mean, median, min, max, and population σ across the visible buckets (skipped when the panel has fewer than two buckets, where they'd be degenerate).
 - Headline totals are week/month-to-date (since local midnight / Monday / month start).
