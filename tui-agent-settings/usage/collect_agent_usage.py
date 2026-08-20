@@ -108,20 +108,37 @@ def discover_pi():
 
 def parse_pi(files):
     for path in files:
-        project_slug = os.path.basename(os.path.dirname(path))
         try:
             f = open(path, "r", encoding="utf-8")
         except OSError:
             continue
         with f:
-            for line in f:
+            # Session slug (dirname) is a lossy encoding of the real cwd, so
+            # prefer the real path captured in the session header.
+            project_path = ""
+            first_lines = []
+            for _ in range(20):
+                line = f.readline()
+                if not line:
+                    break
+                first_lines.append(line)
+                try:
+                    head = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(head, dict) and head.get("type") == "session" and head.get("cwd"):
+                    project_path = head["cwd"]
+            if not project_path:
+                project_path = os.path.basename(os.path.dirname(path))
+
+            def emit(line):
                 line = line.strip()
                 if not line:
-                    continue
+                    return
                 try:
                     entry = json.loads(line)
                 except json.JSONDecodeError:
-                    continue
+                    return
                 etype = entry.get("type")
                 if etype == "message":
                     message = entry.get("message") or {}
@@ -133,15 +150,15 @@ def parse_pi(files):
                     model = entry.get("model")
                     provider = entry.get("provider")
                 else:
-                    continue
+                    return
                 if not usage:
-                    continue
+                    return
                 cost = (usage.get("cost") or {}).get("total")
                 yield record(
                     source="pi",
                     timestamp=entry.get("timestamp"),
                     session_id=entry.get("id"),
-                    project=project_slug,
+                    project=project_path,
                     provider=provider,
                     model=model,
                     input_tokens=int(usage.get("input") or 0),
@@ -152,6 +169,11 @@ def parse_pi(files):
                     total_tokens=usage.get("totalTokens"),
                     cost_usd=float(cost) if cost is not None else None,
                 )
+
+            for line in first_lines:
+                yield from emit(line)
+            for line in f:
+                yield from emit(line)
 
 
 def discover_opencode():
