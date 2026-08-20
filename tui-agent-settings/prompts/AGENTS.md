@@ -22,7 +22,7 @@ Delegation and worktree isolation for the Explore and Execute phases follow the 
 
 ## Subagent Management Protocol
 
-- Keep the main context lean: plan and decide in the main thread; delegate broad exploration (>2 files) and multi-file implementation to a subagent.
+- Long-running, multi-step, or unattended work goes through `pi-goal-list-loop-audit` (`/goal`, `/list`) instead of ad-hoc subagent delegation — its detached auditor independently verifies completion against a contract, so work can't self-grade or silently chain into more delegation.
 - Require a concise, structured summary back from every subagent — never raw tool output or full transcripts.
 - Never pipe raw multi-hundred-line test/compiler output into context; filter to failing frames, line numbers, and error summaries.
 - For parallel or isolated work, use a dedicated git worktree instead of the primary working directory.
@@ -34,7 +34,6 @@ Delegation and worktree isolation for the Explore and Execute phases follow the 
 - **Task Completion**: After non-trivial tasks or architecture decisions, log with `agent-ctx log --action ... --summary ... --files ...` — `--summary` is one high-level line, what changed + why, caveman style (drop filler/hedging, keep exact terms, see `agent-context` skill); save implementation detail for the commit message. Update `.agents/memory.md`/`.agents/decisions.md` with new invariants or gotchas, same style.
 - **Resuming work**: Before touching anything, run `git status` + `agent-ctx history --limit 5` and re-read your last plan/notes. Never re-explore what a previous session already mapped, and never continue from a stale assumption about the state of the tree.
 
-
 ## Think in Code — Compute, Don't Read
 
 The costliest pattern is reading N files into context to extract one fact. Before any Read, ask: "can a script answer this in one line?" If yes, run it — raw contents stay on disk, context only sees the result.
@@ -43,7 +42,6 @@ The costliest pattern is reading N files into context to extract one fact. Befor
 - Counts: `rg -c pattern src | awk -F: '{s+=$2} END{print s}'`
 - API surface of one file: `python3 -c "import ast,sys; ..." file.py`
 - Keep summaries small: `head -30`, `wc -l`, `sort | uniq -c`. The model decides; the script counts.
-
 
 ## Ponytail — Lazy Senior Dev Mode
 

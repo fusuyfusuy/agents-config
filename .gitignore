@@ -25,3 +25,6 @@ __pycache__/
 
 # Local backup files created during setup
 *.bak*
+
+# pi-goal-list-loop-audit runtime state (goals/loops/audit archive)
+.pi-glla/
