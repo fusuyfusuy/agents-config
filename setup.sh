@@ -159,13 +159,15 @@ install_shared() {
              "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/statusline.sh" \
              "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/agy-quota-cache.py" \
              "$SCRIPT_DIR/tui-agent-settings/claude/statusline-command.sh" \
-             "$SCRIPT_DIR/tui-agent-settings/usage/ocgo.py"
+             "$SCRIPT_DIR/tui-agent-settings/usage/ocgo.py" \
+             "$SCRIPT_DIR/tui-agent-settings/usage/toku.py"
 
     mkdir -p "$HOME/.local/bin"
 
     # CLI Binaries
     link_file "$SCRIPT_DIR/tui-agent-settings/skills/agent-context/agent-ctx" "$HOME/.local/bin/agent-ctx"
     link_file "$SCRIPT_DIR/tui-agent-settings/usage/ocgo.py" "$HOME/.local/bin/ocgo"
+    link_file "$SCRIPT_DIR/tui-agent-settings/usage/toku.py" "$HOME/.local/bin/toku"
 
     # agent-kb: build its venv, then symlink the installed console script
     AGENT_KB_DIR="$SCRIPT_DIR/tui-agent-settings/skills/agent-error-kb/agent-kb"

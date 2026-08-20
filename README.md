@@ -15,6 +15,7 @@ A unified configuration and tooling suite for running AI coding agents (Claude C
 | [`tui-agent-settings/tmux/plugins/tmux-agent-alert/`](tui-agent-settings/tmux/plugins/tmux-agent-alert/) | Tmux plugin & hooks alerting via Mosh terminal bell, status flash, statusline badge, and `<prefix> A` focus jump when agents wait for input. |
 | [`tui-agent-settings/claude/`](tui-agent-settings/claude/) | Claude Code settings (`settings.json`) and statusline script. |
 | [`tui-agent-settings/antigravity-cli/`](tui-agent-settings/antigravity-cli/) | Antigravity / Gemini CLI settings, keybindings, MCP server configuration, and statusline/quota scripts. |
+| [`tui-agent-settings/usage/`](tui-agent-settings/usage/) | Token-usage tooling: `collect_agent_usage.py` (all-agent JSONL aggregator), `ocgo` (OpenCode Go quota + who-ate-it report), `toku` (stacked daily/weekly/monthly usage dashboard). |
 | [`tui-agent-settings/pi/`](tui-agent-settings/pi/) | pi extensions (`gated-tools.ts`, `compact-tools.ts`), manually synced with `~/.pi/agent/extensions/`. |
 | [`setup.sh`](setup.sh) | Interactive installer: detects installed agents (Claude Code, AGY, pi), asks which to configure, then symlinks each agent's config, skills, binaries, and plugins. |
 
@@ -204,3 +205,34 @@ ocgo --no-color | less
 - **Formatted tables**: aligned color tables (bold-cyan headers, top consumer bolded). Default shows the **rolling** (active gate) window's top models + top projects, capped to one screen; `--window` picks another window, `--detail` expands to all windows and full per-session tables.
 - **Who ate it**: aggregates the local `opencode.db`, restricted to the paid `opencode-go` provider, per window (by model, by session, token-type split, cost). Reuses `collect_agent_usage.py`'s message parser.
 - Window bounds track the API's `resetsAt` (weekly −7d, monthly −1 calendar month), so weekly/monthly buckets match what the quota measures rather than an arbitrary trailing range.
+
+### 8. `toku` — All-Agent Token Usage Dashboard
+
+[`tui-agent-settings/usage/toku.py`](tui-agent-settings/usage/toku.py) shows every token the machine's agents have burned — Claude Code, pi, and OpenCode together — as stacked by-source bar graphs bucketed by local time. Symlinked to `~/.local/bin/toku` by `setup.sh`.
+
+```bash
+# Full dashboard: headline totals + daily (14d) / weekly (8w) / monthly (6mo) panels
+toku
+
+# Isolate one granularity
+toku --period daily|weekly|monthly
+
+# Plain text for pipes/less
+toku --no-color | less
+```
+
+```
+TOTAL TOKENS   today 332.5M · this week 2.53B · this month 4.85B
+
+DAILY (last 14 days)      peak 08-19 1.17B
+  08-13   ███████████████████████████████████████████▌   796.1M
+  08-19   ██████████████████████████████████████████████ 1.17B  ← peak
+
+  █ claude █ pi █ opencode   · grouped by local time
+```
+
+**Capabilities:**
+- **Everything in one view**: same parsers as `collect_agent_usage.py`, so every logged assistant message with usage counts (including free providers) appears — not just paid traffic. Bars are stacked per source (claude=cyan, pi=magenta, opencode=green) at ⅛-cell resolution; the trailing filled unit colors a mixed cell.
+- **Local-time bucketing**: timestamps from the logs are UTC; records are shifted to the machine's local zone before day/week/month grouping, so "today" means your today.
+- **Honest scaling**: bars share the panel's peak; sub-⅛-cell buckets degrade to a dim `▏` marker instead of disappearing. Quiescent weeks/months are simply absent (no phantom zero bars).
+- Headline totals are week/month-to-date (since local midnight / Monday / month start).
