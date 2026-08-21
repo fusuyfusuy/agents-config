@@ -6,7 +6,7 @@
 - Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
 - Keep components modular and concerns clearly separated.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
-- Ask before guessing: an underspecified request gets 1-4 structured questions with concrete options, never an assumed scope, deliverable, or model.
+- Ask before guessing: an underspecified request gets 1-4 structured questions with concrete options, never an assumed scope, deliverable, or model. 5-6 allowed only if you can name 5+ orthogonal blocking axes that each independently block the Plan; otherwise bundle or defer to a second round.
 
 ## Explore → Plan → Approve → Execute
 

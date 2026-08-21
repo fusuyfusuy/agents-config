@@ -23,9 +23,9 @@ Example plan:
 
 Rule in [`AGENTS.md`](AGENTS.md). When a request is underspecified — scope, target, deliverable, or model left open — ask instead of assuming:
 
-- Ask 1-4 structured questions with 2-4 concrete options each (pi: `ask_user_question`; plain questions with options in other harnesses).
+- Ask 1-4 structured questions with 2-4 concrete options each (pi: `ask_user_question`; plain questions with options in other harnesses). 5-6 allowed only if you can name 5+ orthogonal blocking axes that each independently block the Plan; otherwise bundle or defer to a second round.
 - Mark your recommended option first; keep options mutually exclusive unless several genuinely apply.
-- Batch every question into one ask — one round per ambiguity, never a pestering sequence.
+- Batch every question into one ask — one round per ambiguity, never a pestering sequence. Note: pi's `ask_user_question` still validates max 4 per call — 5-6 means `4 + 1-2` across two calls or via `Type something.`.
 
 ## Workspace Isolation (Git Worktrees)
 
@@ -107,5 +107,3 @@ Re-read your last plan/WIP notes; never re-explore what a previous session alrea
 | `antigravity-cli/status.py`, `antigravity-cli/statusline.sh` | Statusline: quota, branch, context usage, and state alerts. |
 
 (All paths above are relative to `tui-agent-settings/`.)
-
-
