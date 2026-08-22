@@ -1,0 +1,9 @@
+[Unit]
+Description=Toku Live Quota Cache Exporter
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/devhax/projects/fusuyfusuy/agents-config/tui-agent-settings/usage/toku.py --json
+StandardOutput=null
+StandardError=journal
