@@ -333,7 +333,7 @@ class TestQuotas(unittest.TestCase):
             self.assertTrue(os.path.isfile(path))
             with open(path, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
-            self.assertEqual(loaded["harnesses"]["claude"]["session_display"], "92% used")
+            self.assertEqual(loaded["harnesses"]["claude"]["session_display"], "8% left")
             self.assertEqual(loaded["harnesses"]["antigravity"]["week_display"], "99% left")
             self.assertEqual(loaded["harnesses"]["opencode"]["week_display"], "3% left")
 

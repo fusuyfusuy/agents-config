@@ -959,11 +959,16 @@ def render_quotas_panel(quotas, use_color, bar_w=20):
         else:
             used = q["used"]
             limit = q["limit"]
+            rem_p = max(0.0, 100.0 - q["used_pct"])
             used_p = q["used_pct"]
-            fill_units = min(int(round(min(100.0, used_p) / 100 * bar_w)), bar_w)
+            fill_units = max(0, min(int(round(rem_p / 100 * bar_w)), bar_w))
             bar_glyph = c("█" * fill_units, col, use_color) + c("░" * (bar_w - fill_units), DIM, use_color)
             warn = ""
-            info = f"{fmt(used):>7} / {fmt(limit):<5} ({used_p:>5.1f}% used)"
+            if rem_p <= 5.0:
+                warn = c("  🚨 LOW QUOTA", "\033[91m", use_color)
+            elif rem_p <= 20.0:
+                warn = c("  ⚠️ WARNING", "\033[93m", use_color)
+            info = f"{rem_p:>5.1f}% left ({fmt(used)} / {fmt(limit)} used)"
             lines.append(f"  {label:<24} {bar_glyph}  {info:<35}{warn}")
     return lines
 
@@ -986,19 +991,23 @@ def format_quotas_dict(quotas, now=None) -> dict:
     c_5h = quotas.get("Claude 5h (Opus 2x)")
     c_7d = quotas.get("Claude 7d (+50% promo)") or quotas.get("Claude 7d (Opus 2x)")
     if c_5h or c_7d:
-        c_dict = {"mode": "used"}
+        c_dict = {"mode": "remaining"}
         if c_5h:
             c_dict["session_used"] = c_5h["used"]
             c_dict["session_limit"] = c_5h["limit"]
             c_dict["session_pct"] = round(c_5h["used_pct"], 1)
-            c_dict["session_warn"] = c_5h["used_pct"] >= 80.0
-            c_dict["session_display"] = f"{int(round(c_5h['used_pct']))}% used"
+            rem_5h = max(0.0, round(100.0 - c_5h["used_pct"], 1))
+            c_dict["session_remaining_pct"] = rem_5h
+            c_dict["session_warn"] = rem_5h <= 20.0
+            c_dict["session_display"] = f"{int(round(rem_5h))}% left"
         if c_7d:
             c_dict["week_used"] = c_7d["used"]
             c_dict["week_limit"] = c_7d["limit"]
             c_dict["week_pct"] = round(c_7d["used_pct"], 1)
-            c_dict["week_warn"] = c_7d["used_pct"] >= 80.0
-            c_dict["week_display"] = f"{int(round(c_7d['used_pct']))}% used"
+            rem_7d = max(0.0, round(100.0 - c_7d["used_pct"], 1))
+            c_dict["week_remaining_pct"] = rem_7d
+            c_dict["week_warn"] = rem_7d <= 20.0
+            c_dict["week_display"] = f"{int(round(rem_7d))}% left"
         out["harnesses"]["claude"] = c_dict
 
     # Antigravity
