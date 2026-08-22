@@ -23,8 +23,7 @@ Delegation and worktree isolation for the Explore and Execute phases follow the 
 ## Subagent Management Protocol
 
 - Long-running, multi-step, or unattended work goes through `pi-goal-list-loop-audit` (`/goal`, `/list`) instead of ad-hoc subagent delegation — its detached auditor independently verifies completion against a contract, so work can't self-grade or silently chain into more delegation.
-- Require a concise, structured summary back from every subagent — never raw tool output or full transcripts.
-- Never pipe raw multi-hundred-line test/compiler output into context; filter to failing frames, line numbers, and error summaries.
+- Bound subagent scope to one isolated file, symbol, or question before invoking. Require a concise 3-bullet structured summary back — never allow raw tool output, whole-file dumps, or execution transcripts into parent context.
 - For parallel or isolated work, use a dedicated git worktree instead of the primary working directory.
 - If the same failure repeats 3 times in a row: stop, discard the hypothesis, re-read the source from first principles, and escalate with an updated plan.
 
@@ -42,6 +41,7 @@ The costliest pattern is reading N files into context to extract one fact. Befor
 - Counts: `rg -c pattern src | awk -F: '{s+=$2} END{print s}'`
 - API surface of one file: `python3 -c "import ast,sys; ..." file.py`
 - Keep summaries small: `head -30`, `wc -l`, `sort | uniq -c`. The model decides; the script counts.
+- Truncate command output: Never pipe raw multi-hundred-line test, build, or linter output into context. Pipe verbose commands to disk and tail failing frames (`npm test > /tmp/t.log 2>&1 || tail -25 /tmp/t.log`; `pytest -q --tb=short`). Spot-check diffs with `git diff --stat` or targeted hunks, never dump full-tree diffs.
 
 ## Ponytail — Lazy Senior Dev Mode
 
