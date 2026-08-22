@@ -1,0 +1,117 @@
+{
+  "snapshot": "2026-08-20",
+  "source": "llm-search-knowledge repo: data/opencode_go.csv, data/opencode_go_usage_limits.csv, data/results.csv, outputs/ocgo_optimal.html — snapshot, refresh via SKILL.md appendix",
+  "pooled_caps": {
+    "rolling": "$12/5h",
+    "weekly": "$30/wk",
+    "monthly": "$60/mo",
+    "scale": "allowance scales from pooled caps by usage/60"
+  },
+  "tiers": {
+    "design": {
+      "role": "Design / deep",
+      "model": "opencode-go/glm-5.3",
+      "display": "glm-5.3",
+      "intel": 59.5,
+      "code": 74.8,
+      "agentic": 59.1,
+      "cost_per_1m_in": 1.4,
+      "cost_per_1m_out": 4.4,
+      "ctx": "1M",
+      "allowance": "$15/mo",
+      "req_per_month": 1080,
+      "req_per_5h": 220,
+      "notes": "coarse-grained only — per-file design kills budget"
+    },
+    "default": {
+      "role": "Default / mid / verify",
+      "model": "opencode-go/deepseek-v4-flash",
+      "display": "deepseek-v4-flash",
+      "intel": 51.8,
+      "code": 69.1,
+      "agentic": 48.4,
+      "cost_per_1m_in": 0.22,
+      "cost_per_1m_out": 0.66,
+      "ctx": "1M",
+      "allowance": "$30/mo",
+      "req_per_month": 37800
+    },
+    "bulk": {
+      "role": "Bulk fill",
+      "model": "opencode-go/mimo-v2.5",
+      "display": "mimo-v2.5",
+      "intel": 38.0,
+      "code": 56.8,
+      "agentic": 24.4,
+      "cost_per_1m_in": 0.14,
+      "cost_per_1m_out": 0.28,
+      "ctx": "256k",
+      "allowance": "$60/mo",
+      "req_per_month": 150400,
+      "notes": "UI/component codegen: Arena code ELO 1279/rank 23 vs flash 1269/34"
+    },
+    "failover": {
+      "role": "Failover / 2nd opinion",
+      "model": "opencode-go/gpt-5.6-luna",
+      "display": "gpt-5.6-luna",
+      "variants": ["high", "xhigh"],
+      "intel": {
+        "high": 47,
+        "xhigh": 50
+      },
+      "cost_per_1m_in": 0.2,
+      "cost_per_1m_out": 1.2,
+      "ctx": "1M",
+      "allowance": "$15/mo",
+      "req_per_month": 10250,
+      "forbidden": ["base"],
+      "forbidden_reason": "base intel 27 < MiMo 38 — downgrade, never escalation"
+    }
+  },
+  "aux": {
+    "design_backup": {
+      "role": "Design backup",
+      "model": "opencode-go/kimi-k3",
+      "display": "kimi-k3",
+      "intel": 59.7,
+      "code": 76.2,
+      "agentic": 54.3,
+      "allowance": "$15/mo",
+      "req_per_month": 490,
+      "notes": "fallback when Design tier unavailable or failing"
+    },
+    "churn": {
+      "role": "Ultra-cheap churn (<256k ctx, no reasoning)",
+      "model": "opencode-go/hy3",
+      "display": "hy3",
+      "intel": 42.2,
+      "allowance": "$60/mo",
+      "req_per_month": 21500
+    },
+    "fill_escalator": {
+      "role": "Fill escalator (between bulk and default)",
+      "model": "opencode-go/mimo-v2.5-pro",
+      "display": "mimo-v2.5-pro",
+      "req_per_month": 16300,
+      "notes": "still cheap — escalate mimo-v2.5 → mimo-v2.5-pro → deepseek-v4-flash on two consecutive gate failures"
+    }
+  },
+  "escalation": {
+    "fill": [
+      "opencode-go/mimo-v2.5",
+      "opencode-go/mimo-v2.5-pro",
+      "opencode-go/deepseek-v4-flash"
+    ]
+  },
+  "forbidden": [
+    {
+      "model": "opencode-go/gpt-5.6-luna:base",
+      "reason": "intel 27 < mimo 38 — downgrade"
+    }
+  ],
+  "allowance_map": {
+    "$15/mo": ["glm-5.3", "gpt-5.6-luna", "kimi-k3", "grok-4.5", "deepseek-v4-pro", "qwen3.8-max"],
+    "$30/mo": ["deepseek-v4-flash"],
+    "$60/mo": ["mimo-v2.5", "hy3", "minimax-*", "kimi-k2.x", "qwen3.7/3.6-plus"]
+  }
+}

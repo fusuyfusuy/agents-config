@@ -1,0 +1,573 @@
+{
+  "generated_at": "2026-08-21T23:51:47.087136+00:00",
+  "sources": {
+    "openrouter_api": "https://openrouter.ai/api/v1/models",
+    "opencode_api": "https://opencode.ai/zen/go/v1/models",
+    "artificial_analysis": "https://artificialanalysis.ai/leaderboards/models",
+    "lmarena": "https://lmarena.ai/leaderboard/text",
+    "note": "free = OpenRouter prompt+completion $0 + OpenCode usage None (ox-alpha-free); composite = mean of per-source z-scores (AA Intelligence Index, LMArena ELO); cross-source scales incomparable; OpenRouter/OpenCode contribute list + context (no public bulk intelligence metric)"
+  },
+  "n_free": 24,
+  "n_with_aa": 9,
+  "n_with_lm": 6,
+  "models": [
+    {
+      "model_id": "z-ai/glm-5.2:free",
+      "display": "glm-5.2",
+      "display_full": "z-ai/glm-5.2",
+      "provider": "z-ai",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": "glm-5",
+        "aa_intelligence": 40.55415,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": 72.4715527340494,
+        "aa_context": 200000,
+        "lmarena_rank": 56,
+        "lmarena_elo": 1457.0,
+        "lmarena_votes": 27852,
+        "openrouter_context": 256000
+      },
+      "coverage": [
+        "AA",
+        "LM"
+      ],
+      "composite": 0.929
+    },
+    {
+      "model_id": "thinkingmachines/inkling-small:free",
+      "display": "inkling-small",
+      "display_full": "thinkingmachines/inkling-small",
+      "provider": "thinkingmachines",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": "inkling",
+        "aa_intelligence": 42.2947721285326,
+        "aa_coding": 52.0590581217922,
+        "aa_agentic": 34.1283883161512,
+        "aa_median_tps": 83.8713086159215,
+        "aa_context": 1000000,
+        "lmarena_rank": 80,
+        "lmarena_elo": 1440.0,
+        "lmarena_votes": 17484,
+        "openrouter_context": 262144
+      },
+      "coverage": [
+        "AA",
+        "LM"
+      ],
+      "composite": 0.835
+    },
+    {
+      "model_id": "thinkingmachines/inkling:free",
+      "display": "inkling",
+      "display_full": "thinkingmachines/inkling",
+      "provider": "thinkingmachines",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": "inkling",
+        "aa_intelligence": 42.2947721285326,
+        "aa_coding": 52.0590581217922,
+        "aa_agentic": 34.1283883161512,
+        "aa_median_tps": 83.8713086159215,
+        "aa_context": 1000000,
+        "lmarena_rank": 80,
+        "lmarena_elo": 1440.0,
+        "lmarena_votes": 17484,
+        "openrouter_context": 262144
+      },
+      "coverage": [
+        "AA",
+        "LM"
+      ],
+      "composite": 0.835
+    },
+    {
+      "model_id": "google/gemma-4-31b-it:free",
+      "display": "gemma-4-31b-it",
+      "display_full": "google/gemma-4-31b-it",
+      "provider": "google",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": "gemma-4-31b",
+        "aa_intelligence": 29.6949678165957,
+        "aa_coding": 43.4313878485227,
+        "aa_agentic": 14.3787869415808,
+        "aa_median_tps": 35.5040426041323,
+        "aa_context": 256000,
+        "lmarena_rank": 62,
+        "lmarena_elo": 1451.0,
+        "lmarena_votes": 5896,
+        "openrouter_context": 262144
+      },
+      "coverage": [
+        "AA",
+        "LM"
+      ],
+      "composite": 0.347
+    },
+    {
+      "model_id": "google/gemma-4-26b-a4b-it:free",
+      "display": "gemma-4-26b-a4b-it",
+      "display_full": "google/gemma-4-26b-a4b-it",
+      "provider": "google",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": "gemma-4-26b-a4b",
+        "aa_intelligence": 26.0656023232983,
+        "aa_coding": 39.3163060063809,
+        "aa_agentic": 11.0359209621993,
+        "aa_median_tps": null,
+        "aa_context": 256000,
+        "lmarena_rank": 82,
+        "lmarena_elo": 1438.0,
+        "lmarena_votes": 5810,
+        "openrouter_context": 262144
+      },
+      "coverage": [
+        "AA",
+        "LM"
+      ],
+      "composite": 0.038
+    },
+    {
+      "model_id": "nvidia/nemotron-3.5-lightning:free",
+      "display": "nemotron-3.5-lightning",
+      "display_full": "nvidia/nemotron-3.5-lightning",
+      "provider": "nvidia",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": "nemotron-3-5-lightning",
+        "aa_intelligence": 23.632637599256,
+        "aa_coding": 26.7621202663337,
+        "aa_agentic": 13.8496597938144,
+        "aa_median_tps": 313.073014056667,
+        "aa_context": 1000000,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 1000000
+      },
+      "coverage": [
+        "AA"
+      ],
+      "composite": -0.449
+    },
+    {
+      "model_id": "cohere/north-mini-code:free",
+      "display": "north-mini-code",
+      "display_full": "cohere/north-mini-code",
+      "provider": "cohere",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": "north-mini-code",
+        "aa_intelligence": 20.1690287982621,
+        "aa_coding": 36.4518310445277,
+        "aa_agentic": 3.11925085910653,
+        "aa_median_tps": 26.6416591739148,
+        "aa_context": 256000,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 256000
+      },
+      "coverage": [
+        "AA"
+      ],
+      "composite": -0.78
+    },
+    {
+      "model_id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      "display": "nemotron-3-nano-omni-30b-a3b-reasoning",
+      "display_full": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "provider": "nvidia",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": "nemotron-3-nano-omni-30b-a3b",
+        "aa_intelligence": 15.006841515636083,
+        "aa_coding": 13.7536412817312,
+        "aa_agentic": null,
+        "aa_median_tps": 328.431327280631,
+        "aa_context": 256000,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 256000
+      },
+      "coverage": [
+        "AA"
+      ],
+      "composite": -1.274
+    },
+    {
+      "model_id": "openai/gpt-oss-20b:free",
+      "display": "gpt-oss-20b",
+      "display_full": "openai/gpt-oss-20b",
+      "provider": "openai",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": "gpt-oss-20b",
+        "aa_intelligence": 15.2251599944346,
+        "aa_coding": 20.6967852684145,
+        "aa_agentic": 3.10310309278351,
+        "aa_median_tps": 113.23313545096,
+        "aa_context": 131072,
+        "lmarena_rank": 246,
+        "lmarena_elo": 1318.0,
+        "lmarena_votes": 10669,
+        "openrouter_context": 131072
+      },
+      "coverage": [
+        "AA",
+        "LM"
+      ],
+      "composite": -1.733
+    },
+    {
+      "model_id": "dots-studio/dots-3-note-preview:free",
+      "display": "dots-3-note-preview",
+      "display_full": "dots-studio/dots-3-note-preview",
+      "provider": "dots-studio",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 512000
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "google/lyria-3-clip-preview",
+      "display": "lyria-3-clip-preview",
+      "display_full": "google/lyria-3-clip-preview",
+      "provider": "google",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 1048576
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "google/lyria-3-pro-preview",
+      "display": "lyria-3-pro-preview",
+      "display_full": "google/lyria-3-pro-preview",
+      "provider": "google",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 1048576
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "liquid/lfm-2.5-2.6b:free",
+      "display": "lfm-2.5-2.6b",
+      "display_full": "liquid/lfm-2.5-2.6b",
+      "provider": "liquid",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 65536
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "nvidia/nemotron-3-nano-30b-a3b:free",
+      "display": "nemotron-3-nano-30b-a3b",
+      "display_full": "nvidia/nemotron-3-nano-30b-a3b",
+      "provider": "nvidia",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 256000
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "nvidia/nemotron-3-super-120b-a12b:free",
+      "display": "nemotron-3-super-120b-a12b",
+      "display_full": "nvidia/nemotron-3-super-120b-a12b",
+      "provider": "nvidia",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 262144
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "display": "nemotron-3-ultra-550b-a55b",
+      "display_full": "nvidia/nemotron-3-ultra-550b-a55b",
+      "provider": "nvidia",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 1000000
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "nvidia/nemotron-3.5-content-safety:free",
+      "display": "nemotron-3.5-content-safety",
+      "display_full": "nvidia/nemotron-3.5-content-safety",
+      "provider": "nvidia",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 128000
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "nvidia/nemotron-nano-12b-v2-vl:free",
+      "display": "nemotron-nano-12b-v2-vl",
+      "display_full": "nvidia/nemotron-nano-12b-v2-vl",
+      "provider": "nvidia",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 128000
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "nvidia/nemotron-nano-9b-v2:free",
+      "display": "nemotron-nano-9b-v2",
+      "display_full": "nvidia/nemotron-nano-9b-v2",
+      "provider": "nvidia",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 128000
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "openrouter/free",
+      "display": "free",
+      "display_full": "openrouter/free",
+      "provider": "openrouter",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 200000
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "ox-alpha-free",
+      "display": "ox-alpha-free",
+      "display_full": "ox-alpha-free",
+      "provider": "opencode",
+      "source": "oc",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": null
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "poolside/laguna-s-2.1:free",
+      "display": "laguna-s-2.1",
+      "display_full": "poolside/laguna-s-2.1",
+      "provider": "poolside",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 262144
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "poolside/laguna-xs-2.1:free",
+      "display": "laguna-xs-2.1",
+      "display_full": "poolside/laguna-xs-2.1",
+      "provider": "poolside",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 262144
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    },
+    {
+      "model_id": "stealth/ox-alpha",
+      "display": "ox-alpha",
+      "display_full": "stealth/ox-alpha",
+      "provider": "stealth",
+      "source": "or",
+      "benchmarks": {
+        "aa_slug": null,
+        "aa_intelligence": null,
+        "aa_coding": null,
+        "aa_agentic": null,
+        "aa_median_tps": null,
+        "aa_context": null,
+        "lmarena_rank": null,
+        "lmarena_elo": null,
+        "lmarena_votes": null,
+        "openrouter_context": 1048576
+      },
+      "coverage": [
+        "\u2014"
+      ],
+      "composite": null
+    }
+  ]
+}
