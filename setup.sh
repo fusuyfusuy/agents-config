@@ -8,11 +8,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # --------------------------------------------------------------------------
 
 detect_agents() {
-    HAVE_CLAUDE=false; HAVE_AGY=false; HAVE_PI=false; HAVE_OPENCODE=false
+    HAVE_CLAUDE=false
+    HAVE_AGY=false
+    HAVE_PI=false
+    HAVE_OPENCODE=false
 
     if command -v claude >/dev/null 2>&1 || [ -d "$HOME/.claude" ]; then HAVE_CLAUDE=true; fi
-    if command -v agy    >/dev/null 2>&1 || [ -d "$HOME/.gemini" ]; then HAVE_AGY=true; fi
-    if command -v pi     >/dev/null 2>&1 || [ -d "$HOME/.pi" ];     then HAVE_PI=true; fi
+    if command -v agy >/dev/null 2>&1 || [ -d "$HOME/.gemini" ]; then HAVE_AGY=true; fi
+    if command -v pi >/dev/null 2>&1 || [ -d "$HOME/.pi" ]; then HAVE_PI=true; fi
     if command -v opencode >/dev/null 2>&1 || [ -d "$HOME/.config/opencode" ]; then HAVE_OPENCODE=true; fi
 }
 
@@ -24,14 +27,24 @@ resolve_selection() {
     local sel
     sel=$(echo "${1:-all}" | tr '[:upper:]' '[:lower:]')
 
-    INSTALL_CLAUDE=false; INSTALL_AGY=false; INSTALL_PI=false; INSTALL_OPENCODE=false
+    INSTALL_CLAUDE=false
+    INSTALL_AGY=false
+    INSTALL_PI=false
+    INSTALL_OPENCODE=false
     case "$sel" in
-        all)  INSTALL_CLAUDE=$HAVE_CLAUDE; INSTALL_AGY=$HAVE_AGY; INSTALL_PI=$HAVE_PI; INSTALL_OPENCODE=$HAVE_OPENCODE ;;
-        none) : ;;
-        *)    [[ "$sel" == *c* ]] && INSTALL_CLAUDE=true
-              [[ "$sel" == *a* ]] && INSTALL_AGY=true
-              [[ "$sel" == *p* ]] && INSTALL_PI=true
-              [[ "$sel" == *o* ]] && INSTALL_OPENCODE=true ;;
+    all)
+        INSTALL_CLAUDE=$HAVE_CLAUDE
+        INSTALL_AGY=$HAVE_AGY
+        INSTALL_PI=$HAVE_PI
+        INSTALL_OPENCODE=$HAVE_OPENCODE
+        ;;
+    none) : ;;
+    *)
+        [[ "$sel" == *c* ]] && INSTALL_CLAUDE=true
+        [[ "$sel" == *a* ]] && INSTALL_AGY=true
+        [[ "$sel" == *p* ]] && INSTALL_PI=true
+        [[ "$sel" == *o* ]] && INSTALL_OPENCODE=true
+        ;;
     esac
 }
 
@@ -52,7 +65,9 @@ choose_agents() {
 
     # Non-interactive (piped/CI): configure everything that is installed, never hang on read.
     if [ ! -t 0 ]; then
-        INSTALL_CLAUDE=$HAVE_CLAUDE; INSTALL_AGY=$HAVE_AGY; INSTALL_PI=$HAVE_PI
+        INSTALL_CLAUDE=$HAVE_CLAUDE
+        INSTALL_AGY=$HAVE_AGY
+        INSTALL_PI=$HAVE_PI
         echo "==> Non-interactive shell: installing for all detected agents."
         return
     fi
@@ -73,12 +88,18 @@ resolve_tmux() {
     local sel
     sel=$(echo "${1:-all}" | tr '[:upper:]' '[:lower:]')
 
-    INSTALL_TMUX_PLUGINS=false; INSTALL_TMUX_STATUSLINE=false
+    INSTALL_TMUX_PLUGINS=false
+    INSTALL_TMUX_STATUSLINE=false
     case "$sel" in
-        all)  INSTALL_TMUX_PLUGINS=true; INSTALL_TMUX_STATUSLINE=true ;;
-        none) : ;;
-        *)    [[ "$sel" == *p* ]] && INSTALL_TMUX_PLUGINS=true
-              [[ "$sel" == *s* ]] && INSTALL_TMUX_STATUSLINE=true ;;
+    all)
+        INSTALL_TMUX_PLUGINS=true
+        INSTALL_TMUX_STATUSLINE=true
+        ;;
+    none) : ;;
+    *)
+        [[ "$sel" == *p* ]] && INSTALL_TMUX_PLUGINS=true
+        [[ "$sel" == *s* ]] && INSTALL_TMUX_STATUSLINE=true
+        ;;
     esac
 }
 
@@ -92,7 +113,8 @@ choose_tmux() {
 
     # Non-interactive (piped/CI): install everything, never hang on read.
     if [ ! -t 0 ]; then
-        INSTALL_TMUX_PLUGINS=true; INSTALL_TMUX_STATUSLINE=true
+        INSTALL_TMUX_PLUGINS=true
+        INSTALL_TMUX_STATUSLINE=true
         echo "==> Non-interactive shell: installing tmux plugins + statusline."
         return
     fi
@@ -154,13 +176,13 @@ link_skills() {
 install_shared() {
     # Set executable permissions on scripts
     chmod +x "$SCRIPT_DIR/setup.sh" \
-             "$SCRIPT_DIR/tui-agent-settings/skills/agent-context/agent-ctx" \
-             "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/status.py" \
-             "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/statusline.sh" \
-             "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/agy-quota-cache.py" \
-             "$SCRIPT_DIR/tui-agent-settings/claude/statusline-command.sh" \
-             "$SCRIPT_DIR/tui-agent-settings/usage/ocgo.py" \
-             "$SCRIPT_DIR/tui-agent-settings/usage/toku.py"
+        "$SCRIPT_DIR/tui-agent-settings/skills/agent-context/agent-ctx" \
+        "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/status.py" \
+        "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/statusline.sh" \
+        "$SCRIPT_DIR/tui-agent-settings/antigravity-cli/agy-quota-cache.py" \
+        "$SCRIPT_DIR/tui-agent-settings/claude/statusline-command.sh" \
+        "$SCRIPT_DIR/tui-agent-settings/usage/ocgo.py" \
+        "$SCRIPT_DIR/tui-agent-settings/usage/toku.py"
 
     mkdir -p "$HOME/.local/bin"
 
@@ -168,6 +190,8 @@ install_shared() {
     link_file "$SCRIPT_DIR/tui-agent-settings/skills/agent-context/agent-ctx" "$HOME/.local/bin/agent-ctx"
     link_file "$SCRIPT_DIR/tui-agent-settings/usage/ocgo.py" "$HOME/.local/bin/ocgo"
     link_file "$SCRIPT_DIR/tui-agent-settings/usage/toku.py" "$HOME/.local/bin/toku"
+    link_file "$SCRIPT_DIR/tui-agent-settings/usage/ocgo_check.py" "$HOME/.local/bin/ocheck"
+    link_file "$SCRIPT_DIR/tui-agent-settings/usage/free_models_check.py" "$HOME/.local/bin/fcheck"
 
     # agent-kb: build its venv, then symlink the installed console script
     AGENT_KB_DIR="$SCRIPT_DIR/tui-agent-settings/skills/agent-error-kb/agent-kb"
@@ -178,23 +202,23 @@ install_shared() {
             [ -d "$AGENT_KB_DIR/.venv" ] || python3 -m venv "$AGENT_KB_DIR/.venv"
             "$AGENT_KB_DIR/.venv/bin/pip" install --quiet -e "$AGENT_KB_DIR"
         fi
-        link_file "$AGENT_KB_DIR/.venv/bin/agent-kb"        "$HOME/.local/bin/agent-kb"
+        link_file "$AGENT_KB_DIR/.venv/bin/agent-kb" "$HOME/.local/bin/agent-kb"
     fi
 
-    }
+}
 
 install_tmux() {
     local TMUX_DIR="$SCRIPT_DIR/tui-agent-settings/tmux"
     chmod +x "$TMUX_DIR/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux" \
-             "$TMUX_DIR/plugins/tmux-agent-quotas/scripts/render_status.sh" \
-             "$TMUX_DIR/plugins/tmux-agent-quotas/scripts/fetch_quotas.py" \
-             "$TMUX_DIR/plugins/tmux-agent-quotas/scripts/helpers.sh" \
-             "$TMUX_DIR/plugins/tmux-agent-alert/tmux-agent-alert.tmux" \
-             "$TMUX_DIR/plugins/tmux-agent-alert/scripts/alert_handler.sh" \
-             "$TMUX_DIR/plugins/tmux-agent-alert/scripts/render_alerts.sh" \
-             "$TMUX_DIR/plugins/tmux-agent-alert/scripts/clear_alert.sh" \
-             "$TMUX_DIR/plugins/tmux-agent-alert/scripts/jump_to_alert.sh" \
-             "$TMUX_DIR/plugins/tmux-agent-alert/scripts/helpers.sh"
+        "$TMUX_DIR/plugins/tmux-agent-quotas/scripts/render_status.sh" \
+        "$TMUX_DIR/plugins/tmux-agent-quotas/scripts/fetch_quotas.py" \
+        "$TMUX_DIR/plugins/tmux-agent-quotas/scripts/helpers.sh" \
+        "$TMUX_DIR/plugins/tmux-agent-alert/tmux-agent-alert.tmux" \
+        "$TMUX_DIR/plugins/tmux-agent-alert/scripts/alert_handler.sh" \
+        "$TMUX_DIR/plugins/tmux-agent-alert/scripts/render_alerts.sh" \
+        "$TMUX_DIR/plugins/tmux-agent-alert/scripts/clear_alert.sh" \
+        "$TMUX_DIR/plugins/tmux-agent-alert/scripts/jump_to_alert.sh" \
+        "$TMUX_DIR/plugins/tmux-agent-alert/scripts/helpers.sh"
 
     mkdir -p "$HOME/.tmux/plugins"
     if [ -d "$TMUX_DIR/plugins/tmux-agent-quotas" ]; then
@@ -222,14 +246,14 @@ install_tmux_statusline() {
         echo 'set -g status-right "#{agent_alerts}#{agent_quotas} #[bold]#[fg=colour255]│ #(date +%H:%M) #[default]"'
         echo 'run-shell ~/.tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux'
         echo 'run-shell ~/.tmux/plugins/tmux-agent-alert/tmux-agent-alert.tmux'
-    } >> "$tmux_conf"
+    } >>"$tmux_conf"
     echo "  [APPEND] Configured $tmux_conf (agent statusline + plugin hooks)"
 }
 
 install_claude() {
     echo "==> Configuring Claude Code..."
     link_file "$SCRIPT_DIR/tui-agent-settings/prompts/AGENTS.md" "$HOME/.claude/CLAUDE.md"
-    link_file "$SCRIPT_DIR/tui-agent-settings/claude/settings.json"         "$HOME/.claude/settings.json"
+    link_file "$SCRIPT_DIR/tui-agent-settings/claude/settings.json" "$HOME/.claude/settings.json"
     link_file "$SCRIPT_DIR/tui-agent-settings/claude/statusline-command.sh" "$HOME/.claude/statusline-command.sh"
     link_skills "$HOME/.claude/skills"
 }
@@ -243,12 +267,12 @@ install_agy() {
     link_file "$SCRIPT_DIR/tui-agent-settings/prompts/AGENTS.md" "$HOME/.gemini/AGENTS.md"
 
     # Antigravity & Gemini CLI
-    link_file "$AGY_DIR/settings.json"      "$HOME/.gemini/antigravity-cli/settings.json"
-    link_file "$AGY_DIR/keybindings.json"   "$HOME/.gemini/antigravity-cli/keybindings.json"
-    link_file "$AGY_DIR/config.json"        "$HOME/.gemini/config/config.json"
-    link_file "$AGY_DIR/mcp_config.json"    "$HOME/.gemini/config/mcp_config.json"
-    link_file "$AGY_DIR/statusline.sh"      "$HOME/.gemini/antigravity-cli/statusline.sh"
-    link_file "$AGY_DIR/status.py"          "$HOME/.antigravity/status.py"
+    link_file "$AGY_DIR/settings.json" "$HOME/.gemini/antigravity-cli/settings.json"
+    link_file "$AGY_DIR/keybindings.json" "$HOME/.gemini/antigravity-cli/keybindings.json"
+    link_file "$AGY_DIR/config.json" "$HOME/.gemini/config/config.json"
+    link_file "$AGY_DIR/mcp_config.json" "$HOME/.gemini/config/mcp_config.json"
+    link_file "$AGY_DIR/statusline.sh" "$HOME/.gemini/antigravity-cli/statusline.sh"
+    link_file "$AGY_DIR/status.py" "$HOME/.antigravity/status.py"
     link_file "$AGY_DIR/agy-quota-cache.py" "$HOME/.antigravity/agy-quota-cache.py"
 
     link_skills "$HOME/.gemini/config/skills"
@@ -263,6 +287,15 @@ install_pi() {
 
     # Skills (directories with SKILL.md) are discovered from ~/.pi/agent/skills/
     link_skills "$HOME/.pi/agent/skills"
+
+    # Pi extensions (global) — tui-agent-settings/pi/extensions/*.ts -> ~/.pi/agent/extensions/
+    mkdir -p "$HOME/.pi/agent/extensions"
+    if [ -d "$SCRIPT_DIR/tui-agent-settings/pi/extensions" ]; then
+        for ext in "$SCRIPT_DIR"/tui-agent-settings/pi/extensions/*.ts; do
+            [ -e "$ext" ] || continue
+            link_file "$ext" "$HOME/.pi/agent/extensions/$(basename "$ext")"
+        done
+    fi
 }
 
 install_opencode() {
@@ -279,7 +312,7 @@ install_opencode() {
         [ -n "$existing" ] && plugins=$(printf '%s' "$existing" | sed 's/"plugin"[[:space:]]*:[[:space:]]*//')
     fi
 
-    cat > "$cfg" <<EOF
+    cat >"$cfg" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
   "plugin": $plugins,
@@ -305,11 +338,11 @@ choose_tmux
 
 install_shared
 if [ "$INSTALL_CLAUDE" = true ]; then install_claude; fi
-if [ "$INSTALL_AGY"    = true ]; then install_agy; fi
-if [ "$INSTALL_PI"     = true ]; then install_pi; fi
+if [ "$INSTALL_AGY" = true ]; then install_agy; fi
+if [ "$INSTALL_PI" = true ]; then install_pi; fi
 if [ "$INSTALL_OPENCODE" = true ]; then install_opencode; fi
 if [ "$INSTALL_TMUX_STATUSLINE" = true ]; then
-    [ "$INSTALL_TMUX_PLUGINS" = false ] && INSTALL_TMUX_PLUGINS=true && \
+    [ "$INSTALL_TMUX_PLUGINS" = false ] && INSTALL_TMUX_PLUGINS=true &&
         echo "==> Statusline requires the plugins; installing them too."
 fi
 if [ "$INSTALL_TMUX_PLUGINS" = true ]; then install_tmux; fi

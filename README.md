@@ -10,7 +10,7 @@ A unified configuration and tooling suite for running AI coding agents (Claude C
 | :--- | :--- |
 | [`tui-agent-settings/prompts/AGENTS.md`](tui-agent-settings/prompts/AGENTS.md) | Core operating rules: subagent management protocol, project memory protocol, and "Ponytail" lazy-dev mode. Symlinked to `~/.gemini/AGENTS.md` and `~/.claude/CLAUDE.md`. |
 | [`tui-agent-settings/prompts/PROCESSES.md`](tui-agent-settings/prompts/PROCESSES.md) | Concrete how-to recipes backing `AGENTS.md` (worktree isolation, error KB workflow, memory lifecycle). |
-| [`tui-agent-settings/skills/`](tui-agent-settings/skills/) | Shared skill definitions (`agent-context`, `agent-error-kb`, `agent-processes`, `code-summary`), each `SKILL.md` co-located with its backing script where it has one (`agent-context/agent-ctx`, `agent-error-kb/agent-kb/`). Fanned out to all three harnesses by `setup.sh`. |
+| [`tui-agent-settings/skills/`](tui-agent-settings/skills/) | Shared skill definitions (`agent-context`, `agent-error-kb`, `agent-processes`, `code-summary`), each `SKILL.md` co-located with its backing script where it has one (`agent-context/agent-ctx`, `agent-error-kb/agent-kb/`). Fanned out to all three harnesses by `setup.sh`. **`ocgo-routing` (OC Go model-tier routing: design → fill → verify across the pooled budget; tiers live in `tiers.json` so any position is swappable on the go, snapshot in `SKILL.md` dated 2026-08-20; GLLA integration with `/goal`·`/list`·`/loop` included) is a DRAFT — not yet wired (`setup.sh` not re-run).** |
 | [`tui-agent-settings/tmux/plugins/tmux-agent-quotas/`](tui-agent-settings/tmux/plugins/tmux-agent-quotas/) | Tmux plugin displaying live Antigravity and Claude Code subscription quotas in the status bar. |
 | [`tui-agent-settings/tmux/plugins/tmux-agent-alert/`](tui-agent-settings/tmux/plugins/tmux-agent-alert/) | Tmux plugin & hooks alerting via Mosh terminal bell, status flash, statusline badge, and `<prefix> A` focus jump when agents wait for input. |
 | [`tui-agent-settings/claude/`](tui-agent-settings/claude/) | Claude Code settings (`settings.json`) and statusline script. |
@@ -101,6 +101,7 @@ agent-ctx --test
 ```
 
 **Key Features:**
+
 - **Ranked Orientation**: Files are scored and ranked by import in-degree (AST-parsed Python and JS/TS path aliases), commit churn, and entry points rather than alphabetical order.
 - **Structural Budgeting**: `agent-ctx dump` respects token budgets (`--budget default|large|immense|unlimited`) and degrades gracefully: memory invariants $\rightarrow$ ADR titles $\rightarrow$ ranked map $\rightarrow$ collapsed directory summaries.
 - **Zero Daemon**: Pure Python standard library with no external dependencies.
@@ -127,6 +128,7 @@ agent-kb patterns
 ```
 
 **Key Features:**
+
 - **Hybrid Matching**: Combines SHA-256 exact fingerprint matching with token and n-gram fuzzy similarity.
 - **Shared Context**: Accessible by both Antigravity CLI and Claude Code across all workspace sessions.
 
@@ -137,12 +139,14 @@ agent-kb patterns
 [`tui-agent-settings/tmux/plugins/tmux-agent-quotas/`](tui-agent-settings/tmux/plugins/tmux-agent-quotas/) monitors live remaining subscription quotas in the tmux status bar.
 
 Add to `~/.tmux.conf`:
+
 ```tmux
 set -g status-right "#{agent_quotas} #[bold]#[fg=colour255]│ #(date +%H:%M) #[default]"
 run-shell ~/.tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux
 ```
 
 **Interpolations:**
+
 - `#{agy_quota}`: Antigravity primary model quota and reset countdown.
 - `#{claude_quota}`: Claude Code 5-hour rolling and 7-day quota percentages.
 - `#{agent_quotas}`: Combined formatted quota block with color-coded thresholds.
@@ -154,12 +158,14 @@ run-shell ~/.tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux
 [`tui-agent-settings/tmux/plugins/tmux-agent-alert/`](tui-agent-settings/tmux/plugins/tmux-agent-alert/) alerts you when an AI agent or background pane is waiting for user input.
 
 Add to `~/.tmux.conf`:
+
 ```tmux
 set -g status-right "#{agent_alerts}#{agent_quotas} #[bold]#[fg=colour255]│ #(date +%H:%M) #[default]"
 run-shell ~/.tmux/plugins/tmux-agent-alert/tmux-agent-alert.tmux
 ```
 
 **Key Features:**
+
 - **Mosh Bell Forwarding**: Emits ASCII `\a` (BEL) to attached client TTYs so Mosh triggers local terminal audio/visual bells (Ghostty, iTerm2, Kitty, WezTerm, Alacritty).
 - **Statusline Badge**: Shows `#{agent_alerts}` when panes require attention (e.g. `🔔 WAITING [1:agy]`).
 - **Instant Focus Jump**: Press `<prefix> A` to switch directly to the waiting window and pane.
@@ -201,6 +207,7 @@ ocgo --no-color | less
 ```
 
 **Capabilities:**
+
 - **Live windows**: 5h rolling / weekly / monthly used-% and reset countdown from the official `/zen/go/v1/usage` endpoint, color-coded (green/yellow/red by remaining) with progress bars; key from `OPENCODE_GO_API_KEY` or `~/.pi/agent/auth.json`.
 - **Formatted tables**: aligned color tables (bold-cyan headers, top consumer bolded). Default shows the **rolling** (active gate) window's top models + top projects, capped to one screen; `--window` picks another window, `--detail` expands to all windows and full per-session tables.
 - **Who ate it**: aggregates the local `opencode.db`, restricted to the paid `opencode-go` provider, per window (by model, by session, token-type split, cost). Reuses `collect_agent_usage.py`'s message parser.
@@ -238,6 +245,7 @@ DAILY (last 14 days)      peak 08-19 1.17B
 ```
 
 **Capabilities:**
+
 - **Everything in one view**: same parsers as `collect_agent_usage.py`, so every logged assistant message with usage counts (including free providers) appears — not just paid traffic. Bars are stacked per source (claude=cyan, pi=magenta, opencode=green) at ⅛-cell resolution; the trailing filled unit colors a mixed cell.
 - **Local-time bucketing**: timestamps from the logs are UTC; records are shifted to the machine's local zone before day/week/month grouping, so "today" means your today.
 - **Honest scaling**: bars share the panel's peak; sub-⅛-cell buckets degrade to a dim `▏` marker instead of disappearing. Quiescent weeks/months are simply absent (no phantom zero bars).
