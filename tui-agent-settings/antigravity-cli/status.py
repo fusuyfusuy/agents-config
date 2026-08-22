@@ -502,10 +502,32 @@ def should_refresh_quota(data: dict, cache: dict) -> bool:
 def refresh_quota_if_needed(data: dict) -> dict:
     cache = read_json_file(QUOTA_CACHE_FILE)
     if should_refresh_quota(data, cache):
-        live_cache = fetch_live_quota_cache(data.get("email") or "")
-        if live_cache:
-            cache = live_cache
-            write_quota_cache(cache)
+        lock_file = "/tmp/agy_quota_refresh.lock"
+        now = time.time()
+        should_spawn = True
+        try:
+            if os.path.exists(lock_file):
+                mtime = os.path.getmtime(lock_file)
+                if now - mtime < 15.0:
+                    should_spawn = False
+            if should_spawn:
+                with open(lock_file, "w") as f:
+                    f.write(str(now))
+        except Exception:
+            pass
+
+        if should_spawn:
+            email = data.get("email") or ""
+            try:
+                subprocess.Popen(
+                    [sys.executable, os.path.abspath(__file__), "--fetch-quota", email],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except Exception:
+                pass
     return cache
 
 
@@ -723,4 +745,10 @@ def main():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--fetch-quota":
+        expected_email = sys.argv[2] if len(sys.argv) > 2 else ""
+        cache = fetch_live_quota_cache(expected_email)
+        if cache:
+            write_quota_cache(cache)
+        sys.exit(0)
     main()
