@@ -899,7 +899,11 @@ def quota_window_tokens(recs, now=None, tz=None, include_ocgo=True):
         used_pct = (used / limit * 100) if limit > 0 else 0.0
         remaining_pct = max(0.0, 100.0 - used_pct)
         resets_in = ""
-        if earliest_inside and used > 0 and hours < 24*7:
+        if hours == 24 * 7:
+            next_reset = cutoff + timedelta(days=7)
+            if next_reset > now_naive:
+                resets_in = format_compact_td(next_reset - now_naive)
+        elif earliest_inside and used > 0:
             drop_off = earliest_inside + timedelta(hours=hours)
             if drop_off > now_naive:
                 resets_in = format_compact_td(drop_off - now_naive)
