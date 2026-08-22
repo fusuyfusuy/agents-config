@@ -10,7 +10,7 @@ A unified configuration and tooling suite for running AI coding agents (Claude C
 | :--- | :--- |
 | [`tui-agent-settings/prompts/AGENTS.md`](tui-agent-settings/prompts/AGENTS.md) | Core operating rules: subagent management protocol, project memory protocol, and "Ponytail" lazy-dev mode. Symlinked to `~/.gemini/AGENTS.md` and `~/.claude/CLAUDE.md`. |
 | [`tui-agent-settings/prompts/PROCESSES.md`](tui-agent-settings/prompts/PROCESSES.md) | Concrete how-to recipes backing `AGENTS.md` (worktree isolation, error KB workflow, memory lifecycle). |
-| [`tui-agent-settings/skills/`](tui-agent-settings/skills/) | Shared skill definitions (`agent-context`, `agent-error-kb`, `agent-processes`, `code-summary`), each `SKILL.md` co-located with its backing script where it has one (`agent-context/agent-ctx`, `agent-error-kb/agent-kb/`). Fanned out to all three harnesses by `setup.sh`. **`ocgo-routing` (OC Go model-tier routing: design → fill → verify across the pooled budget; tiers live in `tiers.json` so any position is swappable on the go, snapshot in `SKILL.md` dated 2026-08-20; GLLA integration with `/goal`·`/list`·`/loop` included) is a DRAFT — not yet wired (`setup.sh` not re-run).** |
+| [`tui-agent-settings/skills/`](tui-agent-settings/skills/) | Shared skill definitions (`agent-context`, `agent-processes`, `code-summary`), each `SKILL.md` co-located with its backing script where it has one (`agent-context/agent-ctx`). Fanned out to all three harnesses by `setup.sh`. **`ocgo-routing` (OC Go model-tier routing: design → fill → verify across the pooled budget; tiers live in `tiers.json` so any position is swappable on the go, snapshot in `SKILL.md` dated 2026-08-20; GLLA integration with `/goal`·`/list`·`/loop` included) is a DRAFT — not yet wired (`setup.sh` not re-run).** |
 | [`tui-agent-settings/tmux/plugins/tmux-agent-quotas/`](tui-agent-settings/tmux/plugins/tmux-agent-quotas/) | Tmux plugin displaying live Antigravity and Claude Code subscription quotas in the status bar. |
 | [`tui-agent-settings/tmux/plugins/tmux-agent-alert/`](tui-agent-settings/tmux/plugins/tmux-agent-alert/) | Tmux plugin & hooks alerting via Mosh terminal bell, status flash, statusline badge, and `<prefix> A` focus jump when agents wait for input. |
 | [`tui-agent-settings/claude/`](tui-agent-settings/claude/) | Claude Code settings (`settings.json`) and statusline script. |
@@ -47,13 +47,12 @@ Optional tmux integration:
   Enter letters (e.g. 'ps'), 'all', 'none', or leave blank for all:
 ```
 
-- Enter letters to configure exactly those agents, `all` / blank for every detected agent, or `none` for shared tooling only (CLI binaries, `agent-kb` always install).
+- Enter letters to configure exactly those agents, `all` / blank for every detected agent, or `none` for shared tooling only (CLI binaries).
 - The tmux prompt asks separately about **plugins** (`p`) and **statusline** (`s`). Choosing the statusline auto-installs the plugins it renders against; `none`/blank-for-all behave the same as for agents.
 - Non-interactive: with `AGENTS` you override the agent prompt; with `TMUX_SETUP=ps|all|none` you override the tmux prompt. Without a TTY (piped/CI) both defaults install everything detected and never hang on `read`.
 - The statusline block is appended to `~/.tmux.conf` behind a marker line, so re-running setup is idempotent and existing config is never rewritten.
 - Symlinks files under `~/.claude`, `~/.gemini`, `~/.antigravity`, `~/.pi/agent` (pi global instructions + skills), `~/.config/opencode` (opencode `instructions` -> `AGENTS.md` + `PROCESSES.md`), `~/.local/bin`, and `~/.tmux/plugins`.
 - If an existing target file is not already symlinked, it is backed up to `<target>.bak.<timestamp>`.
-- Builds the Python venv for `agent-kb` via `uv` or `python3 -m venv`.
 - Safe to re-run at any time.
 
 ---
@@ -108,33 +107,7 @@ agent-ctx --test
 
 ---
 
-### 2. `agent-kb` — Error Knowledge Base CLI
-
-[`tui-agent-settings/skills/agent-error-kb/agent-kb/`](tui-agent-settings/skills/agent-error-kb/agent-kb/) provides an error-signature knowledge base stored in a local SQLite database (`~/.agent-kb/kb.db`):
-
-```bash
-# Search for verified fixes for an error or stack trace
-agent-kb lookup "fatal: Unable to create '.git/index.lock': File exists"
-
-# Record a verified fix once resolved
-agent-kb record \
-  --error "fatal: Unable to create '.git/index.lock': File exists" \
-  --cause "Stale lockfile left behind by crashed subprocess" \
-  --fix "pgrep -f 'git ' || rm -f .git/index.lock" \
-  --tags "git,lockfile,concurrency"
-
-# List top recurring error patterns
-agent-kb patterns
-```
-
-**Key Features:**
-
-- **Hybrid Matching**: Combines SHA-256 exact fingerprint matching with token and n-gram fuzzy similarity.
-- **Shared Context**: Accessible by both Antigravity CLI and Claude Code across all workspace sessions.
-
----
-
-### 3. `tmux-agent-quotas` — Subscription Quota Monitor
+### 2. `tmux-agent-quotas` — Subscription Quota Monitor
 
 [`tui-agent-settings/tmux/plugins/tmux-agent-quotas/`](tui-agent-settings/tmux/plugins/tmux-agent-quotas/) monitors live remaining subscription quotas in the tmux status bar.
 
@@ -153,7 +126,7 @@ run-shell ~/.tmux/plugins/tmux-agent-quotas/tmux-agent-quotas.tmux
 
 ---
 
-### 4. `tmux-agent-alert` — Mosh & Tmux Alert Dispatcher
+### 3. `tmux-agent-alert` — Mosh & Tmux Alert Dispatcher
 
 [`tui-agent-settings/tmux/plugins/tmux-agent-alert/`](tui-agent-settings/tmux/plugins/tmux-agent-alert/) alerts you when an AI agent or background pane is waiting for user input.
 
@@ -174,21 +147,21 @@ run-shell ~/.tmux/plugins/tmux-agent-alert/tmux-agent-alert.tmux
 
 ---
 
-### 5. pi (Coding Agent)
+### 4. pi (Coding Agent)
 
 `setup.sh` configures [pi](https://pi.dev) — the terminal coding harness used in this repo — by fanning out the same shared resources it installs for Claude Code and AGY:
 
 - `tui-agent-settings/prompts/AGENTS.md` → `~/.pi/agent/AGENTS.md` (pi global instructions)
 - `tui-agent-settings/skills/*` → `~/.pi/agent/skills/` (pi discovers `SKILL.md` directories there)
 
-The skills (`agent-context`, `agent-error-kb`, `agent-processes`, `code-summary`) work unchanged across all three harnesses; pi's model/provider settings live in `~/.pi/agent/settings.json`.
+The skills (`agent-context`, `agent-processes`, `code-summary`) work unchanged across all three harnesses; pi's model/provider settings live in `~/.pi/agent/settings.json`.
 
-### 6. Statusline Visualizations
+### 5. Statusline Visualizations
 
 - **Antigravity ([`tui-agent-settings/antigravity-cli/statusline.sh`](tui-agent-settings/antigravity-cli/statusline.sh))**: Renders agent state (`READY`, `THINKING`, `WORKING`, `TOOL`), active git branch, model name, fine-grained Unicode context bar, subagent count, task count, and sandbox status.
 - **Claude Code ([`tui-agent-settings/claude/statusline-command.sh`](tui-agent-settings/claude/statusline-command.sh))**: Displays workspace path, git branch/dirty state, model, context usage %, and rolling rate limit resets.
 
-### 7. `ocgo` — OpenCode Go Quota & Usage Report
+### 6. `ocgo` — OpenCode Go Quota & Usage Report
 
 [`tui-agent-settings/usage/ocgo.py`](tui-agent-settings/usage/ocgo.py) shows your OpenCode Go subscription quota windows plus a breakdown of what actually consumed them. Symlinked to `~/.local/bin/ocgo` by `setup.sh`.
 
@@ -213,7 +186,7 @@ ocgo --no-color | less
 - **Who ate it**: aggregates the local `opencode.db`, restricted to the paid `opencode-go` provider, per window (by model, by session, token-type split, cost). Reuses `collect_agent_usage.py`'s message parser.
 - Window bounds track the API's `resetsAt` (weekly −7d, monthly −1 calendar month), so weekly/monthly buckets match what the quota measures rather than an arbitrary trailing range.
 
-### 8. `toku` — All-Agent Token Usage Dashboard
+### 7. `toku` — All-Agent Token Usage Dashboard
 
 [`tui-agent-settings/usage/toku.py`](tui-agent-settings/usage/toku.py) shows every token the machine's agents have burned — Claude Code, pi, and OpenCode together — as stacked by-source bar graphs bucketed by local time. Symlinked to `~/.local/bin/toku` by `setup.sh`.
 

@@ -156,7 +156,7 @@ link_file() {
 # Fan out the shared skills (canonical source: tui-agent-settings/skills) into
 # an agent's global skill directory. Same source, several targets. Each skill is
 # symlinked as a whole directory so it tracks the repo and never drifts; a
-# skill's backing script (e.g. agent-ctx, agent-kb/) rides along inside the
+# skill's backing script (e.g. agent-ctx) rides along inside the
 # symlink and is additionally installed once on PATH by install_shared.
 link_skills() {
     local dest_root="$1"
@@ -192,18 +192,6 @@ install_shared() {
     link_file "$SCRIPT_DIR/tui-agent-settings/usage/toku.py" "$HOME/.local/bin/toku"
     link_file "$SCRIPT_DIR/tui-agent-settings/usage/ocgo_check.py" "$HOME/.local/bin/ocheck"
     link_file "$SCRIPT_DIR/tui-agent-settings/usage/free_models_check.py" "$HOME/.local/bin/fcheck"
-
-    # agent-kb: build its venv, then symlink the installed console script
-    AGENT_KB_DIR="$SCRIPT_DIR/tui-agent-settings/skills/agent-error-kb/agent-kb"
-    if [ -d "$AGENT_KB_DIR" ]; then
-        if command -v uv >/dev/null 2>&1; then
-            (cd "$AGENT_KB_DIR" && uv sync --quiet)
-        else
-            [ -d "$AGENT_KB_DIR/.venv" ] || python3 -m venv "$AGENT_KB_DIR/.venv"
-            "$AGENT_KB_DIR/.venv/bin/pip" install --quiet -e "$AGENT_KB_DIR"
-        fi
-        link_file "$AGENT_KB_DIR/.venv/bin/agent-kb" "$HOME/.local/bin/agent-kb"
-    fi
 
 }
 

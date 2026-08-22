@@ -7,7 +7,7 @@
 
 ## Core Invariants & Architecture Rules
 
-- **Stdlib only.** `tui-agent-settings/skills/agent-context/agent-ctx` never takes an external dependency; installed by symlink, not package manager. (`tui-agent-settings/skills/agent-error-kb/agent-kb` opposite — own venv/`uv.lock`.)
+- **Stdlib only.** `tui-agent-settings/skills/agent-context/agent-ctx` never takes an external dependency; installed by symlink, not package manager.
 - **Git is authority on file visibility.** File listing via `git ls-files --cached --others --exclude-standard`. Never hand-parse `.gitignore` — old parser got negations, path-scoped patterns, trailing globs all wrong. `os.walk` + `DEFAULT_IGNORES` path: fallback for non-git dirs only.
 - **No silent caps.** Any truncation in map or `dump` must state it happened + how much withheld. Quiet cap makes agent believe it saw whole repo. Invariant behind character-budget design and "Detailed N of M" footer.
 - **Never fabricate git metadata.** `get_git_branch` returns `None` outside git, `detached@<sha>` on detached HEAD. Previously returned `"main"` unconditionally on failure — wrote false data into permanent activity log.
