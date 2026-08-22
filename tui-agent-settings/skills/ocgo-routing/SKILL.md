@@ -70,10 +70,17 @@ $15/mo, 490/mo), ultra-cheap churn `hy3` (42.2, $60/mo, 21,500/mo) for
 
 ## The design → fill → verify contract
 
-- **Designer** (design tier) emits **executable pseudocode only**: function
-  signatures, data shapes, return contracts, explicit edge cases. Prose
-  descriptions are forbidden — the bulk tier's 24.4 agentic drifts on prose
-  and follows contracts.
+Iterative design (back-and-forth to agree) does NOT run on the design tier —
+`glm-5.3` is `220/5h, 1,080/mo` and dies on loops. Draft on the cheap tier,
+lock on the deep tier:
+
+- **Draft loop** (`tiers.default` / `deepseek-v4-flash`, 48.4 agentic, `7.5k/5h`):
+  back-and-forth with the human until the shape is agreed. Cheap enough to chat.
+- **Lock** (`tiers.design` / `glm-5.3`, 59.1 agentic): **one** final pass that
+  emits **executable pseudocode only**: function signatures, data shapes, return
+  contracts, explicit edge cases. Prose forbidden — bulk's 24.4 agentic drifts on
+  prose and follows contracts. If you need a second lock, you already paid for it;
+  re-draft on default.
 - **Filler** (bulk tier, or default tier for backend fills) transcribes one
   file per contract, verbatim — no interpretation of its own.
 - **Gate before accept — non-negotiable, on every fill**: compile, typecheck,
