@@ -14,6 +14,7 @@ helpers. Symlinked to ~/.local/bin/toku by setup.sh.
 """
 import argparse
 import bisect
+import json
 import math
 import os
 import shutil
@@ -962,13 +963,105 @@ def render_quotas_panel(quotas, use_color, bar_w=20):
             fill_units = min(int(round(min(100.0, used_p) / 100 * bar_w)), bar_w)
             bar_glyph = c("█" * fill_units, col, use_color) + c("░" * (bar_w - fill_units), DIM, use_color)
             warn = ""
-            if used_p >= 100:
-                warn = c("  🚨 LIMIT REACHED", "\033[91m", use_color)
-            elif used_p >= 80:
-                warn = c("  ⚠️ WARNING", "\033[93m", use_color)
             info = f"{fmt(used):>7} / {fmt(limit):<5} ({used_p:>5.1f}% used)"
             lines.append(f"  {label:<24} {bar_glyph}  {info:<35}{warn}")
     return lines
+
+
+DEFAULT_QUOTA_CACHE_PATH = os.path.expanduser("~/.cache/toku/quotas.json")
+
+
+def format_quotas_dict(quotas, now=None) -> dict:
+    now_dt = now or datetime.now(timezone.utc)
+    ts_iso = now_dt.isoformat() if hasattr(now_dt, "isoformat") else str(now_dt)
+    ts_epoch = int(now_dt.timestamp()) if hasattr(now_dt, "timestamp") else int(datetime.now().timestamp())
+
+    out = {
+        "updated_at": ts_iso,
+        "timestamp": ts_epoch,
+        "harnesses": {},
+    }
+
+    # Claude
+    c_5h = quotas.get("Claude 5h (Opus 2x)")
+    c_7d = quotas.get("Claude 7d (+50% promo)") or quotas.get("Claude 7d (Opus 2x)")
+    if c_5h or c_7d:
+        c_dict = {"mode": "used"}
+        if c_5h:
+            c_dict["session_used"] = c_5h["used"]
+            c_dict["session_limit"] = c_5h["limit"]
+            c_dict["session_pct"] = round(c_5h["used_pct"], 1)
+            c_dict["session_warn"] = c_5h["used_pct"] >= 80.0
+            c_dict["session_display"] = f"{int(round(c_5h['used_pct']))}% used"
+        if c_7d:
+            c_dict["week_used"] = c_7d["used"]
+            c_dict["week_limit"] = c_7d["limit"]
+            c_dict["week_pct"] = round(c_7d["used_pct"], 1)
+            c_dict["week_warn"] = c_7d["used_pct"] >= 80.0
+            c_dict["week_display"] = f"{int(round(c_7d['used_pct']))}% used"
+        out["harnesses"]["claude"] = c_dict
+
+    # Antigravity
+    agy_5h = quotas.get("AGY 5h (Flash 3.7)")
+    agy_7d = quotas.get("AGY 7d (Weekly 1B)")
+    if agy_5h or agy_7d:
+        a_dict = {"mode": "remaining"}
+        if agy_5h:
+            a_dict["session_used"] = agy_5h["used"]
+            a_dict["session_limit"] = agy_5h["limit"]
+            a_dict["session_remaining_pct"] = round(agy_5h["remaining_pct"], 1)
+            a_dict["session_warn"] = agy_5h["remaining_pct"] <= 15.0
+            a_dict["session_display"] = f"{int(round(agy_5h['remaining_pct']))}% left"
+        if agy_7d:
+            a_dict["week_used"] = agy_7d["used"]
+            a_dict["week_limit"] = agy_7d["limit"]
+            a_dict["week_remaining_pct"] = round(agy_7d["remaining_pct"], 1)
+            a_dict["week_warn"] = agy_7d["remaining_pct"] <= 15.0
+            a_dict["week_display"] = f"{int(round(agy_7d['remaining_pct']))}% left"
+        out["harnesses"]["antigravity"] = a_dict
+
+    # OpenCode Go
+    oc_roll = quotas.get("OC Go 5h rolling")
+    oc_week = quotas.get("OC Go weekly")
+    oc_month = quotas.get("OC Go monthly")
+    if oc_roll or oc_week or oc_month:
+        o_dict = {"mode": "remaining"}
+        if oc_roll:
+            o_dict["session_pct"] = round(oc_roll["used_pct"], 1)
+            o_dict["session_remaining_pct"] = round(oc_roll["remaining_pct"], 1)
+            o_dict["session_display"] = f"{int(round(oc_roll['remaining_pct']))}% left"
+        if oc_week:
+            o_dict["week_pct"] = round(oc_week["used_pct"], 1)
+            o_dict["week_remaining_pct"] = round(oc_week["remaining_pct"], 1)
+            o_dict["week_warn"] = oc_week["remaining_pct"] <= 20.0
+            o_dict["week_display"] = f"{int(round(oc_week['remaining_pct']))}% left"
+            if oc_week.get("resets_in"):
+                o_dict["week_resets_in"] = oc_week["resets_in"]
+        if oc_month:
+            o_dict["month_pct"] = round(oc_month["used_pct"], 1)
+            o_dict["month_remaining_pct"] = round(oc_month["remaining_pct"], 1)
+            o_dict["month_display"] = f"{int(round(oc_month['remaining_pct']))}% left"
+        out["harnesses"]["opencode"] = o_dict
+
+    return out
+
+
+def export_quota_cache(quotas, path=None, now=None) -> str:
+    target_path = path or DEFAULT_QUOTA_CACHE_PATH
+    data = format_quotas_dict(quotas, now=now)
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    tmp_path = target_path + f".tmp.{os.getpid()}"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, target_path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+    return target_path
 
 
 def main():
@@ -986,6 +1079,8 @@ def main():
                     help="force refresh OpenRouter pricing cache (use with --costs/-c)")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="verbose pricing fetch and unmapped models (use with --costs/-c)")
+    ap.add_argument("-j", "--json", action="store_true",
+                    help="output current quota status as JSON and exit (for Herdr / statusline integration)")
     ap.add_argument("-o", "--ocgo", action="store_true",
                     help="show OpenCode Go subscription windows and 'who-ate-it' traffic report (from ocgo)")
     ap.add_argument("-w", "--window",
@@ -1018,6 +1113,14 @@ def main():
         sys.exit(1)
 
     parsed = parse_records(records)
+    now = datetime.now()
+    quotas = quota_window_tokens(parsed, now)
+    export_quota_cache(quotas, now=now)
+
+    if args.json:
+        print(json.dumps(format_quotas_dict(quotas, now=now), indent=2))
+        return
+
     # fetch pricing once if needed (detail or dashboard)
     pricing_map = None
     pricing_source = ""
@@ -1116,7 +1219,7 @@ def main():
             print()
 
     # Quota rolling windows summary
-    q_lines = render_quotas_panel(quota_window_tokens(parsed, now), use_color)
+    q_lines = render_quotas_panel(quotas, use_color)
     print("\n".join(q_lines))
     print()
 

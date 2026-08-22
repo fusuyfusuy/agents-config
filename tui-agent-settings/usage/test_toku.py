@@ -300,6 +300,43 @@ class TestQuotas(unittest.TestCase):
         self.assertIn("AGY 7d", lines[4])
         self.assertIn("% left", lines[4])
 
+    def test_export_quota_json(self):
+        import tempfile, json, os
+        from toku import format_quotas_dict, export_quota_cache
+
+        mock_quotas = {
+            "Claude 5h (Opus 2x)": {"source": "claude", "used": 264_000_000, "limit": 288_000_000, "used_pct": 91.66, "remaining_pct": 8.34},
+            "Claude 7d (+50% promo)": {"source": "claude", "used": 1_350_000_000, "limit": 2_140_000_000, "used_pct": 63.08, "remaining_pct": 36.92},
+            "AGY 5h (Flash 3.7)": {"source": "antigravity", "used": 12_000_000, "limit": 300_000_000, "used_pct": 4.0, "remaining_pct": 96.0},
+            "AGY 7d (Weekly 1B)": {"source": "antigravity", "used": 12_000_000, "limit": 1_000_000_000, "used_pct": 1.2, "remaining_pct": 98.8},
+            "OC Go 5h rolling": {"source": "opencode", "used_pct": 4.0, "remaining_pct": 96.0, "resets_in": "1h50m", "is_live_ocgo": True},
+            "OC Go weekly": {"source": "opencode", "used_pct": 97.0, "remaining_pct": 3.0, "resets_in": "2d0h", "is_live_ocgo": True},
+            "OC Go monthly": {"source": "opencode", "used_pct": 48.0, "remaining_pct": 52.0, "resets_in": "28d17h", "is_live_ocgo": True},
+        }
+        now = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
+        d = format_quotas_dict(mock_quotas, now=now)
+        self.assertEqual(d["timestamp"], int(now.timestamp()))
+        self.assertIn("claude", d["harnesses"])
+        self.assertIn("antigravity", d["harnesses"])
+        self.assertIn("opencode", d["harnesses"])
+
+        self.assertEqual(d["harnesses"]["claude"]["session_pct"], 91.7)
+        self.assertTrue(d["harnesses"]["claude"]["session_warn"])
+        self.assertEqual(d["harnesses"]["antigravity"]["week_remaining_pct"], 98.8)
+        self.assertEqual(d["harnesses"]["opencode"]["week_remaining_pct"], 3.0)
+        self.assertTrue(d["harnesses"]["opencode"]["week_warn"])
+
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "sub", "quotas.json")
+            out_path = export_quota_cache(mock_quotas, path=path, now=now)
+            self.assertEqual(out_path, path)
+            self.assertTrue(os.path.isfile(path))
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            self.assertEqual(loaded["harnesses"]["claude"]["session_display"], "92% used")
+            self.assertEqual(loaded["harnesses"]["antigravity"]["week_display"], "99% left")
+            self.assertEqual(loaded["harnesses"]["opencode"]["week_display"], "3% left")
+
 
 if __name__ == "__main__":
     unittest.main()
