@@ -41,6 +41,19 @@ WINDOWS = [
     ("monthly", "monthly"),
 ]
 
+# short letters accepted by -w/--window, mapped to canonical keys
+WINDOW_ALIASES = {"r": "rolling", "w": "weekly", "m": "monthly"}
+
+
+def window_type(val: str) -> str:
+    """argparse type for -w/--window: accept r|w|m or full names."""
+    v = val.strip().lower()
+    if v in WINDOW_ALIASES or v in {"rolling", "weekly", "monthly"}:
+        return WINDOW_ALIASES.get(v, v)
+    raise argparse.ArgumentTypeError(
+        f"invalid window {val!r} (use r|w|m or rolling|weekly|monthly)"
+    )
+
 # residual-risk: a key absconding, API down, or auth missing -> report shows
 # "--" for the live section but still prints the local breakdown with
 # relative window bounds, so "who ate it" stays useful offline.
@@ -80,7 +93,7 @@ def fetch_windows() -> dict:
         return {}
 
 
-def parse_epoch(iso: str) -> float | None:
+def parse_epoch(iso: str | None) -> float | None:
     if not iso:
         return None
     try:
@@ -89,7 +102,7 @@ def parse_epoch(iso: str) -> float | None:
         return None
 
 
-def countdown(iso: str) -> str:
+def countdown(iso: str | None) -> str:
     epoch = parse_epoch(iso)
     if epoch is None:
         return ""
@@ -147,7 +160,8 @@ def load_paid_records() -> list[dict]:
     for rec in cau.parse_opencode(cau.discover_opencode()):
         if not (rec["model"] or "").startswith(f"{PAID_PROVIDER}/"):
             continue
-        ts_ms = int(parse_epoch(rec["timestamp"]) * 1000) if rec["timestamp"] else 0
+        epoch = parse_epoch(rec["timestamp"]) if rec["timestamp"] else None
+        ts_ms = int(epoch * 1000) if epoch is not None else 0
         title, directory = sessions.get(rec["session_id"], ("", ""))
         records.append({
             "ts_ms": ts_ms,
@@ -166,7 +180,8 @@ def load_paid_records() -> list[dict]:
     for rec in cau.parse_pi(cau.discover_pi()):
         if rec.get("provider") != PAID_PROVIDER:
             continue
-        ts_ms = int(parse_epoch(rec["timestamp"]) * 1000) if rec["timestamp"] else 0
+        epoch = parse_epoch(rec["timestamp"]) if rec["timestamp"] else None
+        ts_ms = int(epoch * 1000) if epoch is not None else 0
         # pi logs carry no per-session title, only the session-dir project slug.
         records.append({
             "ts_ms": ts_ms,
@@ -403,13 +418,13 @@ def run_report(records: list[dict], usage: dict, detail: bool, picked: list[str]
 def main() -> None:
     ap = argparse.ArgumentParser(description="OpenCode Go quota status + who-ate-it report")
     ap.add_argument(
-        "--window",
-        choices=["rolling", "weekly", "monthly"],
-        help="show one window's who-ate-it table (default: rolling = active gate)",
+        "-w", "--window",
+        type=window_type, metavar="W",
+        help="window to report: r|w|m or rolling|weekly|monthly (default: rolling)",
     )
-    ap.add_argument("--cost", action="store_true", help="total spent per window only, no tables")
-    ap.add_argument("--detail", action="store_true", help="all windows, full per-session tables (long)")
-    ap.add_argument("--no-color", action="store_true", help="disable ANSI color")
+    ap.add_argument("-c", "--cost", action="store_true", help="total spent per window only, no tables")
+    ap.add_argument("-d", "--detail", action="store_true", help="all windows, full per-session tables (long)")
+    ap.add_argument("-n", "--no-color", action="store_true", help="disable ANSI color")
     args = ap.parse_args()
 
     use_color = not args.no_color and sys.stdout.isatty()

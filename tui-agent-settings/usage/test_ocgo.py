@@ -55,6 +55,7 @@ def test_subtract_period_monthly():
     # monthly reset on 09-19 17:43 -> period starts 08-19 17:43 (same day/time)
     iso = "2026-09-19T17:43:09.220Z"
     start = O.subtract_period(iso, "monthly")
+    assert start is not None, "monthly period start must be a float"
     from datetime import datetime, timezone
     got = datetime.fromtimestamp(start, tz=timezone.utc)
     assert (got.year, got.month, got.day) == (2026, 8, 19), got
@@ -62,6 +63,7 @@ def test_subtract_period_monthly():
     from datetime import datetime, timezone
     w_reset = datetime(2026, 8, 24, tzinfo=timezone.utc).timestamp()
     w = O.subtract_period("2026-08-24T00:00:00Z", "weekly")
+    assert w is not None, "weekly period start must be a float"
     assert abs(w - (w_reset - 7 * 86400)) < 10, datetime.fromtimestamp(w, tz=timezone.utc)
     print("subtract_period month/week: OK")
 
@@ -118,6 +120,25 @@ def test_load_paid_records_filters_provider():
         O.load_session_map = orig_map
 
 
+def test_window_flag_aliases():
+    # short letters map to canonical window keys (case/space-insensitive)
+    assert O.window_type("m") == "monthly"
+    assert O.window_type("w") == "weekly"
+    assert O.window_type("r") == "rolling"
+    assert O.window_type("MONTHLY") == "monthly"
+    assert O.window_type(" rolling ") == "rolling"
+    assert O.window_type("weekly") == "weekly"  # full name passes through
+    # anything else is rejected with argparse's native error type
+    for bad in ("x", "month", "foo", ""):
+        try:
+            O.window_type(bad)
+        except O.argparse.ArgumentTypeError:
+            pass
+        else:
+            raise AssertionError(f"expected ArgumentTypeError for {bad!r}")
+    print("window flag aliases (r|w|m, -w/-c/-d/-n): OK")
+
+
 def test_human_and_money():
     assert O.human(999) == "999"
     assert O.human(1500) == "1.5k"
@@ -138,5 +159,6 @@ if __name__ == "__main__":
     test_window_bounds_fallback()
     test_subtract_period_monthly()
     test_load_paid_records_filters_provider()
+    test_window_flag_aliases()
     test_human_and_money()
     print("all ocgo self-checks passed")

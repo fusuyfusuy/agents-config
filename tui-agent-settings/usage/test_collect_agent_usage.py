@@ -106,8 +106,42 @@ def test_opencode():
         os.unlink(path)
 
 
+def test_antigravity():
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
+        # Step 0: User input
+        f.write(json.dumps({
+            "step_index": 0,
+            "type": "USER_INPUT",
+            "created_at": "2026-08-15T02:30:00Z",
+            "content": "Hello agent " * 10,  # 120 chars -> 30 in_tokens next turn
+        }) + "\n")
+        # Step 1: Planner response
+        f.write(json.dumps({
+            "step_index": 1,
+            "type": "PLANNER_RESPONSE",
+            "created_at": "2026-08-15T02:30:05Z",
+            "content": "Running command...",  # 18 chars
+            "thinking": "Thinking deeply...",  # 18 chars -> 4 reasoning
+            "tool_calls": [{"name": "run_command", "args": {"cmd": "ls"}}],
+        }) + "\n")
+        path = f.name
+    try:
+        recs = list(cau.parse_antigravity([path]))
+        assert len(recs) == 1, f"expected 1 record, got {len(recs)}"
+        r = recs[0]
+        assert r["source"] == "antigravity"
+        assert r["input_tokens"] == 120 // 4
+        assert r["reasoning_tokens"] == 18 // 4
+        assert r["total_tokens"] > 0
+        assert r["cost_usd"] == 0.0
+        print("parse_antigravity: OK")
+    finally:
+        os.unlink(path)
+
+
 if __name__ == "__main__":
     test_claude()
     test_pi()
     test_opencode()
+    test_antigravity()
     print("all collect_agent_usage self-checks passed")

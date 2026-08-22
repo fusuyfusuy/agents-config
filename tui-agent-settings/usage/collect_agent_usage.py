@@ -19,7 +19,8 @@ from datetime import datetime, timezone
 CLAUDE_PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 PI_SESSIONS_DIR = os.path.expanduser("~/.pi/agent/sessions")
 OPENCODE_DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
-AGY_QUOTA_CACHE = os.path.expanduser("~/.antigravity/quota-cache.json")
+AGY_BRAIN_DIR = os.path.expanduser("~/.gemini/antigravity-cli/brain")
+AGY_SUMMARIES_DB = os.path.expanduser("~/.gemini/antigravity-cli/conversation_summaries.db")
 
 
 def ms_to_iso(ms) -> str:
@@ -217,13 +218,107 @@ def parse_opencode(db_files):
 
 
 def discover_antigravity():
-    return [AGY_QUOTA_CACHE] if os.path.isfile(AGY_QUOTA_CACHE) else []
+    if not os.path.isdir(AGY_BRAIN_DIR):
+        return []
+    found = []
+    try:
+        entries = sorted(os.scandir(AGY_BRAIN_DIR), key=lambda e: e.name)
+    except OSError:
+        return []
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        log_dir = os.path.join(entry.path, ".system_generated", "logs")
+        full_path = os.path.join(log_dir, "transcript_full.jsonl")
+        trans_path = os.path.join(log_dir, "transcript.jsonl")
+        if os.path.isfile(full_path):
+            found.append(full_path)
+        elif os.path.isfile(trans_path):
+            found.append(trans_path)
+    return found
+
+
+def _load_agy_workspaces():
+    workspace_map = {}
+    if os.path.isfile(AGY_SUMMARIES_DB):
+        try:
+            con = sqlite3.connect(f"file:{AGY_SUMMARIES_DB}?mode=ro", uri=True)
+            cur = con.execute("SELECT conversation_id, workspace_uris FROM conversation_summaries")
+            for cid, uris in cur:
+                if uris:
+                    try:
+                        u_list = json.loads(uris)
+                        if u_list and isinstance(u_list, list):
+                            p = u_list[0].replace("file://", "")
+                            workspace_map[cid] = p
+                    except Exception:
+                        pass
+            con.close()
+        except Exception:
+            pass
+    return workspace_map
+
+
+def parse_antigravity(files):
+    workspace_map = _load_agy_workspaces()
+    for path in files:
+        try:
+            f = open(path, "r", encoding="utf-8")
+        except OSError:
+            continue
+        parts = os.path.abspath(path).split(os.sep)
+        session_id = parts[-4] if len(parts) >= 4 else os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(path))))
+        project = workspace_map.get(session_id, "")
+
+        current_context_chars = 0
+        with f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                etype = entry.get("type")
+                content = entry.get("content") or ""
+                thinking = entry.get("thinking") or ""
+                tool_calls = entry.get("tool_calls") or []
+
+                tc_len = sum(len(json.dumps(tc)) for tc in tool_calls) if tool_calls else 0
+                step_chars = len(content) + len(thinking) + tc_len
+
+                if etype == "PLANNER_RESPONSE":
+                    in_tok = current_context_chars // 4
+                    out_tok = (len(content) + tc_len) // 4
+                    reasoning_tok = len(thinking) // 4
+                    total_out = out_tok + reasoning_tok
+
+                    yield record(
+                        source="antigravity",
+                        timestamp=entry.get("created_at"),
+                        session_id=session_id,
+                        project=project,
+                        provider="google",
+                        model="gemini-3.7-flash",
+                        input_tokens=in_tok,
+                        output_tokens=total_out,
+                        cache_read_tokens=0,
+                        cache_write_tokens=0,
+                        reasoning_tokens=reasoning_tok,
+                        total_tokens=in_tok + total_out,
+                        cost_usd=0.0,
+                    )
+
+                current_context_chars += step_chars
 
 
 SOURCES = [
     ("claude", discover_claude, parse_claude),
     ("pi", discover_pi, parse_pi),
     ("opencode", discover_opencode, parse_opencode),
+    ("antigravity", discover_antigravity, parse_antigravity),
 ]
 
 
@@ -238,13 +333,6 @@ def main():
         recs = list(parse(files))
         all_records.extend(recs)
         print(f"[discover] {name}: {len(files)} log file(s) -> {len(recs)} usage record(s)", file=sys.stderr)
-
-    agy_files = discover_antigravity()
-    print(
-        f"[discover] antigravity: {len(agy_files)} state file(s) found — "
-        "no token counters exposed (only live remaining-quota %), excluded from output",
-        file=sys.stderr,
-    )
 
     all_records.sort(key=lambda r: r["timestamp"] or "")
 

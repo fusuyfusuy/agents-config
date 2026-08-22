@@ -8,7 +8,8 @@ import toku
 from toku import (parse_ts_local, parse_records, bucketize, period_totals, render_bar, panel_lines,
                   fmt, stats, percentile, log_bins, hist_chars, aggregate_models, aggregate_projects,
                   token_type_totals, cache_hit, rhythm_buckets, detail_model_table,
-                  CYAN, MAGENTA)
+                  quota_window_tokens, render_quotas_panel,
+                  CYAN, MAGENTA, YELLOW)
 
 
 def rec(ts, src, tokens):
@@ -97,11 +98,17 @@ class RenderBar(unittest.TestCase):
         self.assertEqual(render_bar([25, 25], 100, 1)[0], ("▌", MAGENTA))
 
     def test_single_source(self):
-        self.assertEqual(render_bar([0, 100], 100, 3),
+        self.assertEqual(render_bar([0, 100, 0, 0], 100, 3),
                          [("█", MAGENTA)] * 3)
 
+    def test_four_sources_split(self):
+        cells = render_bar([25, 25, 25, 25], 100, 4)
+        self.assertEqual(len(cells), 4)
+        self.assertEqual([ch for ch, _ in cells], ["█"] * 4)
+        self.assertEqual([col for _, col in cells], [CYAN, MAGENTA, toku.SRC_COLOR["opencode"], YELLOW])
+
     def test_zero_total(self):
-        self.assertEqual(render_bar([0, 0, 0], 0, 4),
+        self.assertEqual(render_bar([0, 0, 0, 0], 0, 4),
                          [(" ", "")] * 4)
 
 
@@ -242,6 +249,56 @@ class Fmt(unittest.TestCase):
         self.assertEqual(fmt(42), "42")
         self.assertEqual(fmt(0), "0")
         self.assertEqual(fmt(1.5), "1.5")   # sub-thousand fraction (count means)
+
+
+class TestQuotas(unittest.TestCase):
+    def test_quota_rolling_windows_and_opus_weight(self):
+        now = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)
+        raws = [
+            # Claude: 2h ago Sonnet (1x weight: 100k)
+            dict(rec("2026-08-20T10:00:00Z", "claude", 100_000), model="claude-sonnet-5"),
+            # Claude: 3h ago Opus (2x weight: 50k -> 100k)
+            dict(rec("2026-08-20T09:00:00Z", "claude", 50_000), model="claude-opus-5"),
+            # Claude: 2 days ago (in 7d window, outside 5h: 200k)
+            dict(rec("2026-08-18T12:00:00Z", "claude", 200_000), model="claude-sonnet-5"),
+            # AGY: 1h ago (in 5h window: 500k)
+            dict(rec("2026-08-20T11:00:00Z", "antigravity", 500_000), model="gemini-3.7-flash"),
+            # AGY: 3 days ago (in 7d window: 10M)
+            dict(rec("2026-08-17T12:00:00Z", "antigravity", 10_000_000), model="gemini-3.7-flash"),
+        ]
+        parsed = parse_records(raws, tz=timezone.utc)
+        quotas = quota_window_tokens(parsed, now=now, tz=timezone.utc, include_ocgo=False)
+
+        # Claude 5h: 100k + 2*50k = 200k (used mode)
+        c_5h = quotas["Claude 5h (Opus 2x)"]
+        self.assertEqual(c_5h["used"], 200_000)
+        self.assertEqual(c_5h["mode"], "used")
+        self.assertAlmostEqual(c_5h["used_pct"], 200_000 / 288_000_000 * 100)
+
+        # Claude 7d: 100k + 2*50k = 200k (2026-08-18 was before Wednesday 22:59 reset)
+        c_7d = quotas["Claude 7d (+50% promo)"]
+        self.assertEqual(c_7d["used"], 200_000)
+        self.assertEqual(c_7d["mode"], "used")
+
+        # AGY 5h: 500k (remaining mode)
+        agy_5h = quotas["AGY 5h (Flash 3.7)"]
+        self.assertEqual(agy_5h["used"], 500_000)
+        self.assertEqual(agy_5h["mode"], "remaining")
+        self.assertAlmostEqual(agy_5h["remaining_pct"], 100.0 - 500_000 / 300_000_000 * 100)
+
+        # AGY 7d: 500k + 10M = 10.5M
+        agy_7d = quotas["AGY 7d (Weekly 1B)"]
+        self.assertEqual(agy_7d["used"], 10_500_000)
+        self.assertEqual(agy_7d["mode"], "remaining")
+        self.assertAlmostEqual(agy_7d["remaining_pct"], 100.0 - 10.5e6 / 1e9 * 100)
+
+        # Render panel check
+        lines = render_quotas_panel(quotas, False)
+        self.assertEqual(len(lines), 5)  # header + 4 rows
+        self.assertIn("Claude 5h", lines[1])
+        self.assertIn("% used", lines[1])
+        self.assertIn("AGY 7d", lines[4])
+        self.assertIn("% left", lines[4])
 
 
 if __name__ == "__main__":
