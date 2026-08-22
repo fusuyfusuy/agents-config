@@ -848,6 +848,20 @@ def claude_weekly_reset_start(now_dt: datetime) -> datetime:
     return candidate.replace(tzinfo=timezone.utc).astimezone(local_tz).replace(tzinfo=None)
 
 
+def format_compact_td(td) -> str:
+    if not td or td.total_seconds() <= 0:
+        return ""
+    total_secs = int(td.total_seconds())
+    days = total_secs // 86400
+    hours = (total_secs % 86400) // 3600
+    mins = (total_secs % 3600) // 60
+    if days > 0:
+        return f"{days}d{hours}h" if hours > 0 else f"{days}d"
+    if hours > 0:
+        return f"{hours}h{mins}m" if mins > 0 else f"{hours}h"
+    return f"{max(1, mins)}m"
+
+
 def quota_window_tokens(recs, now=None, tz=None, include_ocgo=True):
     """Compute token usage in rolling 5h and weekly cycles for Claude & Antigravity,
     and fetch live OpenCode Go subscription windows if reachable.
@@ -869,18 +883,26 @@ def quota_window_tokens(recs, now=None, tz=None, include_ocgo=True):
         else:
             cutoff = now_naive - timedelta(hours=hours)
         used = 0
+        earliest_inside = None
         for r in recs:
             if r.get("source") != src:
                 continue
             dt = r.get("dt")
             if dt is None or dt < cutoff:
                 continue
+            if earliest_inside is None or dt < earliest_inside:
+                earliest_inside = dt
             tok = r.get("tokens") or 0
             if src == "claude" and "opus" in (r.get("model") or "").lower():
                 tok *= 2
             used += tok
         used_pct = (used / limit * 100) if limit > 0 else 0.0
         remaining_pct = max(0.0, 100.0 - used_pct)
+        resets_in = ""
+        if earliest_inside and used > 0 and hours < 24*7:
+            drop_off = earliest_inside + timedelta(hours=hours)
+            if drop_off > now_naive:
+                resets_in = format_compact_td(drop_off - now_naive)
         res[label] = {
             "source": src,
             "hours": hours,
@@ -888,6 +910,7 @@ def quota_window_tokens(recs, now=None, tz=None, include_ocgo=True):
             "used": used,
             "used_pct": used_pct,
             "remaining_pct": remaining_pct,
+            "resets_in": resets_in,
             "label": label,
             "mode": "used" if src == "claude" else "remaining",
         }
@@ -895,6 +918,8 @@ def quota_window_tokens(recs, now=None, tz=None, include_ocgo=True):
     agy_live = load_agy_live_quota()
     if agy_live and "AGY 5h (Flash 3.7)" in res:
         res["AGY 5h (Flash 3.7)"]["live"] = agy_live
+        if agy_live.get("refreshes_in"):
+            res["AGY 5h (Flash 3.7)"]["resets_in"] = agy_live["refreshes_in"]
 
     if include_ocgo:
         try:
@@ -947,6 +972,7 @@ def render_quotas_panel(quotas, use_color, bar_w=20):
             live_note = ""
             if q.get("live"):
                 live_note = f" · live {q['live']['remaining_pct']:.1f}%"
+            resets_note = f" · in {q['resets_in']}" if q.get("resets_in") else ""
             fill_units = max(0, min(int(round(rem_p / 100 * bar_w)), bar_w))
             bar_glyph = c("█" * fill_units, col, use_color) + c("░" * (bar_w - fill_units), DIM, use_color)
             warn = ""
@@ -954,13 +980,14 @@ def render_quotas_panel(quotas, use_color, bar_w=20):
                 warn = c("  🚨 LOW QUOTA", "\033[91m", use_color)
             elif rem_p <= 15.0:
                 warn = c("  ⚠️ WARNING", "\033[93m", use_color)
-            info = f"{rem_p:>5.1f}% left ({fmt(used)} / {fmt(limit)} used{live_note})"
+            info = f"{rem_p:>5.1f}% left ({fmt(used)} / {fmt(limit)} used{live_note}{resets_note})"
             lines.append(f"  {label:<24} {bar_glyph}  {info:<35}{warn}")
         else:
             used = q["used"]
             limit = q["limit"]
             rem_p = max(0.0, 100.0 - q["used_pct"])
             used_p = q["used_pct"]
+            resets_note = f" · in {q['resets_in']}" if q.get("resets_in") else ""
             fill_units = max(0, min(int(round(rem_p / 100 * bar_w)), bar_w))
             bar_glyph = c("█" * fill_units, col, use_color) + c("░" * (bar_w - fill_units), DIM, use_color)
             warn = ""
@@ -968,7 +995,7 @@ def render_quotas_panel(quotas, use_color, bar_w=20):
                 warn = c("  🚨 LOW QUOTA", "\033[91m", use_color)
             elif rem_p <= 20.0:
                 warn = c("  ⚠️ WARNING", "\033[93m", use_color)
-            info = f"{rem_p:>5.1f}% left ({fmt(used)} / {fmt(limit)} used)"
+            info = f"{rem_p:>5.1f}% left ({fmt(used)} / {fmt(limit)} used{resets_note})"
             lines.append(f"  {label:<24} {bar_glyph}  {info:<35}{warn}")
     return lines
 
@@ -1000,6 +1027,8 @@ def format_quotas_dict(quotas, now=None) -> dict:
             c_dict["session_remaining_pct"] = rem_5h
             c_dict["session_warn"] = rem_5h <= 20.0
             c_dict["session_display"] = f"{int(round(rem_5h))}% left"
+            if c_5h.get("resets_in"):
+                c_dict["session_resets_in"] = c_5h["resets_in"]
         if c_7d:
             c_dict["week_used"] = c_7d["used"]
             c_dict["week_limit"] = c_7d["limit"]
@@ -1008,6 +1037,8 @@ def format_quotas_dict(quotas, now=None) -> dict:
             c_dict["week_remaining_pct"] = rem_7d
             c_dict["week_warn"] = rem_7d <= 20.0
             c_dict["week_display"] = f"{int(round(rem_7d))}% left"
+            if c_7d.get("resets_in"):
+                c_dict["week_resets_in"] = c_7d["resets_in"]
         out["harnesses"]["claude"] = c_dict
 
     # Antigravity
@@ -1021,12 +1052,17 @@ def format_quotas_dict(quotas, now=None) -> dict:
             a_dict["session_remaining_pct"] = round(agy_5h["remaining_pct"], 1)
             a_dict["session_warn"] = agy_5h["remaining_pct"] <= 15.0
             a_dict["session_display"] = f"{int(round(agy_5h['remaining_pct']))}% left"
+            res_5h = agy_5h.get("live", {}).get("refreshes_in") or agy_5h.get("resets_in")
+            if res_5h:
+                a_dict["session_resets_in"] = res_5h
         if agy_7d:
             a_dict["week_used"] = agy_7d["used"]
             a_dict["week_limit"] = agy_7d["limit"]
             a_dict["week_remaining_pct"] = round(agy_7d["remaining_pct"], 1)
             a_dict["week_warn"] = agy_7d["remaining_pct"] <= 15.0
             a_dict["week_display"] = f"{int(round(agy_7d['remaining_pct']))}% left"
+            if agy_7d.get("resets_in"):
+                a_dict["week_resets_in"] = agy_7d["resets_in"]
         out["harnesses"]["antigravity"] = a_dict
 
     # OpenCode Go
@@ -1039,6 +1075,8 @@ def format_quotas_dict(quotas, now=None) -> dict:
             o_dict["session_pct"] = round(oc_roll["used_pct"], 1)
             o_dict["session_remaining_pct"] = round(oc_roll["remaining_pct"], 1)
             o_dict["session_display"] = f"{int(round(oc_roll['remaining_pct']))}% left"
+            if oc_roll.get("resets_in"):
+                o_dict["session_resets_in"] = oc_roll["resets_in"]
         if oc_week:
             o_dict["week_pct"] = round(oc_week["used_pct"], 1)
             o_dict["week_remaining_pct"] = round(oc_week["remaining_pct"], 1)
@@ -1050,6 +1088,8 @@ def format_quotas_dict(quotas, now=None) -> dict:
             o_dict["month_pct"] = round(oc_month["used_pct"], 1)
             o_dict["month_remaining_pct"] = round(oc_month["remaining_pct"], 1)
             o_dict["month_display"] = f"{int(round(oc_month['remaining_pct']))}% left"
+            if oc_month.get("resets_in"):
+                o_dict["month_resets_in"] = oc_month["resets_in"]
         out["harnesses"]["opencode"] = o_dict
 
     return out

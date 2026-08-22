@@ -296,7 +296,7 @@ class TestQuotas(unittest.TestCase):
         lines = render_quotas_panel(quotas, False)
         self.assertEqual(len(lines), 5)  # header + 4 rows
         self.assertIn("Claude 5h", lines[1])
-        self.assertIn("% used", lines[1])
+        self.assertIn("% left", lines[1])
         self.assertIn("AGY 7d", lines[4])
         self.assertIn("% left", lines[4])
 
