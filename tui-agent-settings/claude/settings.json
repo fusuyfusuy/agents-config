@@ -15,5 +15,7 @@
   "tui": "fullscreen",
   "theme": "dark",
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": false
+  "agentPushNotifEnabled": false,
+  "model": "opus",
+  "hooks": {"SessionStart":[{"matcher":"*","hooks":[{"type":"command","command":"bash '/home/devhax/.claude/hooks/herdr-agent-state.sh' session","timeout":10}]}]}
 }

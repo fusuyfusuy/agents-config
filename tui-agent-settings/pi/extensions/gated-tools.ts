@@ -1,3 +1,4 @@
+// @ts-nocheck — pi extension runs via jiti, not this project's tsconfig
 // Gated tools: pi-web-access tools and the subagent tool are OFF by default.
 // The agent must get your OK before first use each session, unless your latest
 // user message explicitly tells it to use them (e.g. "use subagents", "search the web").
@@ -8,7 +9,10 @@
 //
 // NOTE: approvals live for the pi process lifetime (shared across forks in the
 // same run). This is intentional to avoid re-nagging; it resets on a fresh `pi`.
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 
 const WEB_TOOLS = new Set([
   "web_search",
@@ -48,29 +52,36 @@ function explicitlyAsked(text: string, category: string): boolean {
   const t = text.toLowerCase();
   if (category === "web") {
     return (
-      /\b(use|run|call|try|go|open|enable|search|browse|look up|lookup)\b/.test(t) &&
-      /\b(web|internet|online|browse|online research)\b/.test(t)
+      /\b(use|run|call|try|go|open|enable|search|browse|look up|lookup)\b/.test(
+        t,
+      ) && /\b(web|internet|online|browse|online research)\b/.test(t)
     );
   }
   if (category === "subagents") {
-    return /\bsubagent/.test(t) && /\b(use|run|spawn|delegate|launch|enable|try|with|review|audit)/.test(t);
+    return (
+      /\bsubagent/.test(t) &&
+      /\b(use|run|spawn|delegate|launch|enable|try|with|review|audit)/.test(t)
+    );
   }
   return false;
 }
 
 export default function (pi: ExtensionAPI) {
   // Tell the model to ask first, so it rarely trips the gate in the first place.
-  pi.on("context", (event) => {
+  pi.on("context", (event: any) => {
     const note =
       "Cost guard: the web-access tools (web_search/source_check/fetch_content/get_search_content) and " +
       "the subagent tool are OFF by default. Before using any of them, ask me for permission — the gate " +
-      "will prompt me and I decide. If I explicitly say to use \"web\"/\"search that\" or \"subagents\" in my " +
+      'will prompt me and I decide. If I explicitly say to use "web"/"search that" or "subagents" in my ' +
       "message, you may proceed without asking.";
-    event.messages = [{ role: "system", content: note }, ...(event.messages as any[])];
+    event.messages = [
+      { role: "system", content: note },
+      ...(event.messages as any[]),
+    ];
     return { messages: event.messages };
   });
 
-  pi.on("tool_call", async (event, ctx) => {
+  pi.on("tool_call", async (event: any, ctx: any) => {
     const category = categoryFor(event.toolName);
     if (!category || approved.has(category)) return;
 
